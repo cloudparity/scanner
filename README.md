@@ -171,7 +171,7 @@ sha256sum -c SHA256SUMS --ignore-missing      # macOS: shasum -a 256 -c SHA256SU
 
 That proves the download is intact. To prove it was *built by this repository's workflow at
 the commit the release names*, and not by whoever holds the Releases page, every binary, the
-`SHA256SUMS` file and the container image carry a signed build-provenance attestation
+`SHA256SUMS` file and the container image each carry their own signed build-provenance attestation
 ([GitHub artifact attestations](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds):
 a SLSA provenance statement, signed with a short-lived Sigstore certificate the workflow obtains
 through OIDC, so there is no signing key to steal). You need the [GitHub CLI](https://cli.github.com)
@@ -197,10 +197,14 @@ A good result says `✓ Verification succeeded!` and, below it, one matching att
 one this repository's workflow produced at that tag: do not run it. (Without a terminal, in a
 script, a good result prints nothing and exits 0.) `--owner cloudparity` accepts an attestation
 from any repository in the organisation; `--repo cloudparity/scanner` narrows it to this one.
-Each release also attaches the binaries' attestation as `scanner_<tag>.sigstore.json`;
-`gh attestation verify <file> --bundle scanner_<tag>.sigstore.json --owner cloudparity` checks
-against that copy instead of the one GitHub's API serves. The image's attestation is pushed to
-ghcr.io beside the image as well, so it follows a mirror.
+Each release also attaches every file's attestation beside it as a Sigstore bundle,
+`<file>.sigstore.json` (`scanner_v0.1.0_linux_amd64.sigstore.json`, `SHA256SUMS.sigstore.json`,
+and so on); `gh attestation verify <file> --bundle <file>.sigstore.json --owner cloudparity`
+checks against that copy instead of the one GitHub's API serves, so a mirror of the Releases
+page stays verifiable. `scanner_<tag>.intoto.jsonl` is the same six bundles in one file, one per
+line, and `--bundle scanner_<tag>.intoto.jsonl` works for any of the files: `gh` tries each line
+and accepts the one whose subject is the file. The image's attestation is pushed to ghcr.io
+beside the image as well, so it follows a mirror.
 
 The release notes name the commit and the Go version each binary was built from, and the digest
 of the container image built from the same commit. A binary you build yourself from a clean
@@ -212,7 +216,8 @@ same flags but from a context without `.git`, so it carries no stamp and hashes 
 The workflows that produce them are `.github/workflows/release.yml` and
 `.github/workflows/image.yml`; both run `go test ./...` on the tagged commit before they build,
 and a release is not published until the image for the tag is anonymously pullable and both
-the binaries and the image have passed the two `gh attestation verify` commands above, run by
+the binaries and the image have passed the two `gh attestation verify` commands above (each
+file against the API, against its own `.sigstore.json` and against the `.intoto.jsonl`), run by
 the workflow itself.
 
 ## Check the tree yourself
