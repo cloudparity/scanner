@@ -56,6 +56,23 @@ restore-as-files on one named backup instance (`agent/internal/backup/postgres/c
 `scan` reach any of that code, or lets `backup` write anywhere other than the container and the
 backup instance it was given, is in scope.
 
+## Dependency advisories, and the one we carry
+
+The gate is `govulncheck`: it must report **zero vulnerabilities in code the scanner calls and
+zero in packages it imports**, in source mode (`govulncheck ./...`) and against the built binary
+(`govulncheck -mode=binary`). An advisory that names only a *module* in the graph, for a package
+the scanner neither imports nor links, is informational: it is not in the binary and cannot
+run. That is the line this section is held to.
+
+### Known residual advisories
+
+| Advisory | Module | Why it is unreachable | Why no bump clears it | What retires it |
+|---|---|---|---|---|
+| [GO-2026-5932](https://pkg.go.dev/vuln/GO-2026-5932) — `golang.org/x/crypto/openpgp` is unmaintained | `golang.org/x/crypto` | `openpgp` is not imported and not linked. `go list -deps ./agent/cmd/scanner` shows only `golang.org/x/crypto/pkcs12` (and its `internal/rc2`) from the module; `go tool nm` on the binary has no `openpgp` symbol. `govulncheck` reports it as `Your code is affected by 0 vulnerabilities. This scan also found 0 vulnerabilities in packages you import and 1 vulnerability in modules you require`, with `Fixed in: N/A` | The OSV record has `introduced: 0` and no fixed event, so every version of `x/crypto` carries it. `x/crypto` stays in the graph because `azidentity` (latest, v1.14.1) imports `golang.org/x/crypto/pkcs12` for client-certificate credentials, and the scanner needs `azidentity` to authenticate. A `replace` to a fork would hide the row at the cost of a supply-chain dependency we do not want in a public repository | An upstream `azidentity` release that stops importing `pkcs12`. Re-run `govulncheck` on every `azidentity` bump; when the row no longer appears, delete it here |
+
+If `govulncheck` reports anything not in this table, that is a bug, not a policy question: fix the
+dependency or the code, and do not add rows to justify it.
+
 ## Supported versions
 
 The latest release. Report against `main` if you can.
