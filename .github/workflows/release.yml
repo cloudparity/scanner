@@ -253,8 +253,11 @@ jobs:
       # merged between the previous v* tag and this one, grouped by the subject's scope prefix
       # (deps:, docs:, release:, ...) and linked to its PR. main takes squash merges only, so
       # each merged PR is one commit whose subject ends in "(#N)"; a subject without one (the
-      # root commit) is listed unlinked. The previous tag is the highest v* tag below this one
-      # in version order; the first tag has none and lists everything back to the root commit.
+      # root commit) is listed unlinked. A Conventional Commits group after the type is
+      # accepted too, and Dependabot's "build(deps): bump ..." / "build(deps-dev): ..." land
+      # under Dependencies with the rest of deps:. The previous tag is the highest v* tag below
+      # this one in version order; the first tag has none and lists everything back to the root
+      # commit.
       # Read from the API, not a checkout, because this job has no checkout. The same step run
       # locally with GH_REPO and GITHUB_REF_NAME set reproduces the section for any tag.
       - name: changes since the previous tag
@@ -292,7 +295,11 @@ jobs:
               {
                 line = $0; pr = ""; scope = "other"
                 if (match(line, / \(#[0-9]+\)$/)) { pr = substr(line, RSTART + 3, RLENGTH - 4); line = substr(line, 1, RSTART - 1) }
-                if (match(line, /^[a-z][a-z0-9-]*: /)) { scope = substr(line, 1, RLENGTH - 2); line = substr(line, RLENGTH + 1) }
+                if (match(line, /^[a-z][a-z0-9-]*(\([a-z0-9-]+\))?: /)) {
+                  prefix = substr(line, 1, RLENGTH - 2); line = substr(line, RLENGTH + 1); group = ""
+                  if (match(prefix, /\(.*\)$/)) { group = substr(prefix, RSTART + 1, RLENGTH - 2); prefix = substr(prefix, 1, RSTART - 1) }
+                  scope = (group == "deps" || group == "deps-dev") ? "deps" : prefix
+                }
                 line = toupper(substr(line, 1, 1)) substr(line, 2)
                 if (pr != "") line = line " ([#" pr "](https://github.com/" repo "/pull/" pr "))"
                 if (!(scope in items)) { seen[++n] = scope; if (!(scope in rank)) rank[scope] = 100 + n }
