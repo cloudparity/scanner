@@ -150,6 +150,9 @@ absence is explained where it would otherwise appear in `scanner.bicep` and
 compiles both files and checks the job declares the parameters and environment above, that the
 upload command probes the binary first, and that the subscription template refuses `parityApiUrl`
 with a default image that cannot upload. It skips when no Bicep compiler is installed, so install
-one (`az bicep install`) to run it for real. `.github/workflows/image.yml` checks, after every
-push of the image, that the tag it published is anonymously pullable — the template grants the
-job no registry credential, so if that check cannot see the image, neither can your deployment.
+one (`az bicep install`) to run it for real; CI puts a pinned `bicep` on `PATH` and runs it on
+every pull request. `.github/workflows/image.yml` checks, after every push of the image, that the
+tag it published is anonymously pullable — the template grants the job no registry credential, so
+if that check cannot see the image, neither can your deployment. On `main` that is a warning; on
+a release tag it fails the workflow, and `.github/workflows/release.yml` will not publish a
+release until the image for its tag is pullable.

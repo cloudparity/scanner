@@ -1,6 +1,7 @@
 name: verify
-# The gate every pull request has to pass before it can merge, and every push to main runs
-# again so the branch is known-good at the commit the image and release workflows build from.
+# The gate every pull request has to pass before it can merge. Branch protection on main requires
+# this check and a pull request (no direct pushes, administrators included), so main only ever
+# holds commits that passed it; every push to main runs it once more at the merge commit.
 # No Docker daemon and no cloud credential: everything here runs on the checkout alone.
 on:
   pull_request:
@@ -22,6 +23,21 @@ jobs:
           # Module cache keyed on go.sum: a dependency change misses, a source change hits.
           cache: true
           cache-dependency-path: go.sum
+
+      # deploy/azure/template_test.go compiles the template a customer deploys and checks what
+      # the job it declares passes to the scanner. It skips without a Bicep compiler, so one is
+      # put on PATH here - a fixed release, checked against a fixed digest - and `go test ./...`
+      # below then runs those tests for real instead of skipping them.
+      - name: bicep
+        env:
+          BICEP_VERSION: v0.47.16
+          BICEP_SHA256: 64c345a58e0c3e48b1bc98a4e62d6b3adb1d238281297de3400aeafb2697aa5a
+        run: |
+          curl -sSL -o bicep "https://github.com/Azure/bicep/releases/download/${BICEP_VERSION}/bicep-linux-x64"
+          echo "${BICEP_SHA256}  bicep" | sha256sum -c -
+          chmod +x bicep && sudo mv bicep /usr/local/bin/bicep
+          bicep --version
+
       - name: gofmt
         run: |
           unformatted="$(gofmt -l .)"

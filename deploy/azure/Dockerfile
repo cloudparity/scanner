@@ -10,7 +10,9 @@
 # under QEMU. That is not a preference: building linux/amd64 on an arm64 Mac by emulation fails
 # outright with "fatal error: found bad pointer in Go heap", because QEMU mis-emulates what the
 # Go runtime does. Cross-compiling is also several times faster.
-FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
+# The same Go minor as go.mod and the root Dockerfile, so every artifact of one commit is built
+# by the same toolchain line; the release notes name the exact patch version.
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS build
 ARG TARGETOS
 ARG TARGETARCH
 WORKDIR /src

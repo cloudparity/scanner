@@ -3,13 +3,17 @@ name: release
 # GitHub Release with the binaries attached. The release body says how to verify a download,
 # names the container image digest for the same tag (published by image.yml), and links the
 # permissions the scanner asks for.
+#
+# A tag can point at any commit and never triggers verify, so this job runs `go test ./...` on
+# the tagged commit itself before it builds anything. It also refuses to publish until the
+# image for the same tag is anonymously pullable: a release must never name an image a
+# customer cannot pull.
 on:
   push:
     tags: ['v*']
 
 permissions:
   contents: write   # create the release and upload its assets
-  packages: read    # read the image digest for the same tag
 
 env:
   IMAGE: ghcr.io/cloudparity/scanner
@@ -24,6 +28,9 @@ jobs:
           go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
+
+      - name: go test
+        run: go test ./...
 
       # Static (CGO off), -trimpath so the binary does not record the runner's directory
       # layout, -s -w to drop the symbol table and DWARF. The same flags as the Dockerfile,
@@ -42,18 +49,17 @@ jobs:
           (cd dist && sha256sum scanner_* > SHA256SUMS && cat SHA256SUMS)
 
       # The image workflow runs on the same tag push, in parallel. Wait for it to publish
-      # :<tag> so the release can name the digest; if it has not arrived within ten minutes,
-      # the release still goes out and says where the digest will be.
+      # :<tag>, asking ghcr.io anonymously - with no credential, exactly as the install template
+      # does - so the digest named below is one a customer can pull. If it is not there within
+      # ten minutes (image.yml failed, or the package is still private), no release is created:
+      # fix that and re-run this workflow.
       - name: image digest
         id: image
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           repo="${IMAGE#ghcr.io/}"
           digest=""
           for _ in $(seq 1 30); do
-            token="$(curl -sf -u "${GITHUB_ACTOR}:${GITHUB_TOKEN}" \
-                     "https://ghcr.io/token?scope=repository:${repo}:pull&service=ghcr.io" | jq -r '.token // empty')"
+            token="$(curl -sf "https://ghcr.io/token?scope=repository:${repo}:pull&service=ghcr.io" | jq -r '.token // empty')"
             if [ -n "$token" ]; then
               digest="$(curl -sI -H "Authorization: Bearer $token" \
                         -H 'Accept: application/vnd.oci.image.index.v1+json' \
@@ -64,11 +70,15 @@ jobs:
                         | tr -d '\r' | awk 'tolower($1) == "docker-content-digest:" {print $2}')"
             fi
             [ -n "$digest" ] && break
-            echo "waiting for $IMAGE:$GITHUB_REF_NAME"
+            echo "waiting for $IMAGE:$GITHUB_REF_NAME to be anonymously pullable"
             sleep 20
           done
+          if [ -z "$digest" ]; then
+            echo "::error::$IMAGE:$GITHUB_REF_NAME is not anonymously pullable: check the image workflow run for this tag and the package visibility, then re-run this workflow"
+            exit 1
+          fi
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
-          echo "digest: ${digest:-not published yet}"
+          echo "digest: $digest"
 
       - name: release notes
         env:
@@ -93,12 +103,7 @@ jobs:
             echo "docker pull $IMAGE:$tag"
             echo '```'
             echo
-            if [ -n "$DIGEST" ]; then
-              echo "Digest: \`$IMAGE@$DIGEST\`. Pin it in \`deploy/azure/scanner.bicep\` (\`image=\`) or a mirror."
-            else
-              echo "The image for this tag had not finished publishing when this release was written;"
-              echo "its digest is in the summary of the \`image\` workflow run for \`$tag\`."
-            fi
+            echo "Digest: \`$IMAGE@$DIGEST\`. Pin it in \`deploy/azure/scanner.bicep\` (\`image=\`) or a mirror."
             echo
             echo "## Permissions"
             echo

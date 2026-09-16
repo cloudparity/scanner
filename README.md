@@ -159,9 +159,15 @@ sha256sum -c SHA256SUMS --ignore-missing      # macOS: shasum -a 256 -c SHA256SU
 ```
 
 The release notes name the commit and the Go version each binary was built from, and the digest
-of the container image built from the same commit, so you can build the same commit yourself
-(`CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" ./agent/cmd/scanner`) and compare. The
-workflows that produce them are `.github/workflows/release.yml` and `.github/workflows/image.yml`.
+of the container image built from the same commit. A binary you build yourself from a clean
+checkout of that commit, with that Go version and the same command
+(`CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" ./agent/cmd/scanner`), is byte-identical to
+the released one; the checkout matters because Go stamps the commit into the binary
+(`go version -m scanner` shows it). The image's binary is built from the same source with the
+same flags but from a context without `.git`, so it carries no stamp and hashes differently.
+The workflows that produce them are `.github/workflows/release.yml` and
+`.github/workflows/image.yml`; both run `go test ./...` on the tagged commit before they build,
+and neither publishes until the image for the tag is anonymously pullable.
 
 ## Check the tree yourself
 
@@ -170,8 +176,11 @@ workflows that produce them are `.github/workflows/release.yml` and `.github/wor
 - `grep -rn 'http.Method\(Post\|Put\|Delete\|Patch\)' --include='*.go' --exclude='*_test.go' .`
   finds every non-GET call: the estate upload, and the `backup`/`prune` pipeline described above.
 - `make all` runs `gofmt`, `go vet`, the linter, the tests and the build. CI
-  (`.github/workflows/verify.yml`) runs `gofmt`, `go vet`, `go test ./...` and `go build ./...`
-  on every pull request and every push to `main`, with no Docker daemon and no cloud credential.
+  (`.github/workflows/verify.yml`) runs `gofmt`, `go vet`, `go test ./...` (with a pinned Bicep
+  compiler on `PATH`, so the install template is compiled and checked) and `go build ./...` on
+  every pull request and every push to `main`, with no Docker daemon and no cloud credential.
+  `main` accepts only pull requests that passed it, administrators included:
+  `gh api repos/cloudparity/scanner/branches/main/protection`.
 
 ## Report a problem
 

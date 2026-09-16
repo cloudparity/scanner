@@ -73,10 +73,10 @@ var defaultImage = 'ghcr.io/cloudparity/scanner:latest'
 // empty console. So while this is false the template refuses parityApiUrl with the default
 // image (below) rather than deploying that job.
 //
-// To lift it: publish an image from main at or after 8c30031, point defaultImage and the
-// parameter default at it, and set this to true. verify.yml pulls the pinned image, runs
-// `scan -h` and fails the build if this flag disagrees with the binary in either direction, so
-// the flag cannot drift from what the tag actually contains.
+// To lift it: point defaultImage and the parameter default at a tag this repository published,
+// and set this to true. Every image .github/workflows/image.yml publishes is checked before push
+// to list -api-url in `scan -h` (its smoke step), so any tag from here can upload; this flag
+// says whether the DEFAULT is one of them.
 var defaultImageUploads = false
 
 @description('Only for customers mirroring the image into their own private registry. Leave empty to pull the public image anonymously.')

@@ -8,8 +8,9 @@
 // told the scanner where the API was, so a customer who deployed it could not see their estate.
 //
 // Needs a Bicep compiler - `bicep` on PATH, or `az` with the bicep extension - and skips without
-// one, because `go test ./...` runs on machines with neither. CI's install-template job installs
-// `bicep` and runs this package, so the skip is a local convenience, not a gap in the gate.
+// one, because `go test ./...` runs on machines with neither. CI (.github/workflows/verify.yml)
+// puts a pinned `bicep` on PATH before `go test ./...`, so the skip is a local convenience, not
+// a gap in the gate.
 package azure
 
 import (
@@ -139,7 +140,8 @@ func TestJobReceivesApiUrlAndKeyFromEnvironment(t *testing.T) {
 
 // With no API url the job keeps doing what it always did - write the estate onto the mounted
 // share - and with one it uploads instead of redirecting stdout. Both commands exist, chosen by
-// the parameter, and both still pass the flags verify.yml checks for.
+// the parameter, and both pass --subscription and --exclude-groups, the flags `scan` defines in
+// agent/cmd/scanner/main.go.
 func TestJobCommandSwitchesOnApiUrl(t *testing.T) {
 	arm := compile(t, "scanner-resources.bicep")
 	job := resource(t, arm, "Microsoft.App/jobs")
@@ -162,7 +164,9 @@ func TestJobCommandSwitchesOnApiUrl(t *testing.T) {
 // binary ignores it, prints the estate to a stdout nobody keeps and exits 0 - the customer sees a
 // successful execution and an empty console. So until defaultImageUploads says the pinned tag can
 // upload, scanner.bicep refuses parityApiUrl with the default image at deployment time instead of
-// deploying that job. verify.yml runs the pinned image and checks the flag agrees with the binary.
+// deploying that job. Every image .github/workflows/image.yml publishes is checked, before push,
+// to list -api-url in `scan -h`, so any tag from this repository can upload; the flag says
+// whether the DEFAULT is one of them.
 func TestDefaultImageRefusesUploadUntilItCan(t *testing.T) {
 	arm := compile(t, "scanner.bicep")
 	vars, _ := arm["variables"].(map[string]any)

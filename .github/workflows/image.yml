@@ -5,6 +5,10 @@ name: image
 #   push to main  ->  :<commit sha> and :latest
 #   tag v*        ->  :<tag>, e.g. :v0.1.0
 #
+# Nothing is pushed until the commit has passed `go test ./...` here and the built image has
+# passed the smoke check below. Branch protection already keeps untested commits off main; the
+# test run here is what covers a tag, which can point at any commit and never triggers verify.
+#
 # linux/amd64 only: Container Apps runs x86-64. The Dockerfile cross-compiles from the runner's
 # native toolchain (--platform=$BUILDPLATFORM), so nothing here is emulated.
 on:
@@ -31,6 +35,12 @@ jobs:
           cache: true
           cache-dependency-path: go.sum
 
+      # The gate. The same `go test ./...` as verify.yml, run on the exact commit this image is
+      # built from; a failure here ends the job before anything is built or pushed. (The Bicep
+      # template tests skip without a compiler; verify.yml is where they run.)
+      - name: go test
+        run: go test ./...
+
       # `go mod download` runs INSIDE the docker build, where the runner's module cache is
       # invisible. Staging it into the build context as .gomodcache/ lets the Dockerfile serve
       # it as a file:// module proxy (see the COPY there), so a cache hit downloads nothing.
@@ -52,14 +62,18 @@ jobs:
       - name: docker build
         run: docker build --platform linux/amd64 -f deploy/azure/Dockerfile -t "$IMAGE:build" .
 
-      # The binary with no arguments prints its usage and exits 2. Anything else - an image
-      # that does not start, a binary built for the wrong architecture, an entrypoint that
-      # moved - fails here, before the image is published.
+      # Two probes, both without a cloud or a credential. With no arguments the binary prints its
+      # usage and exits 2: an image that does not start, a binary built for the wrong architecture
+      # or an entrypoint that moved all fail here. `scan -h` must list -api-url: the job command
+      # in deploy/azure/scanner-resources.bicep checks for that flag before it scans, so an image
+      # without it would deploy and then exit 1 on every execution.
       - name: smoke
         run: |
           out="$(docker run --rm "$IMAGE:build" 2>&1 || true)"
           echo "$out"
           echo "$out" | grep -q '^usage: scanner ' || { echo "the image did not print the scanner usage"; exit 1; }
+          docker run --rm "$IMAGE:build" scan -h 2>&1 | grep -q -- '-api-url' \
+            || { echo "scan -h does not list -api-url; the install template's job command requires it"; exit 1; }
 
       - name: docker login ghcr.io
         env:
@@ -81,34 +95,42 @@ jobs:
             echo "- digest \`${digest:-unknown}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # The install template pulls this image anonymously: no registry credential is granted
-      # to the job, so a private package fails every customer deployment on image pull.
-      # Visibility is a package setting, not something a workflow can change, so this only
-      # warns - loudly - rather than failing the push that just happened.
+      # The install template pulls this image anonymously: no registry credential is granted to
+      # the job, so a private package fails every customer deployment on image pull. Visibility
+      # is a package setting a workflow cannot change (the first push creates the package
+      # private), so on main this warns; on a tag it fails, because release.yml refuses to
+      # publish a release whose image a customer cannot pull, and the fix is the same either
+      # way: set the package to public and re-run.
       - name: check the package is publicly pullable
         env:
           TAGS: ${{ steps.tags.outputs.tags }}
         run: |
           repo="${IMAGE#ghcr.io/}"
+          settings="https://github.com/orgs/cloudparity/packages/container/scanner/settings"
+          fail=0
           token="$(curl -sf "https://ghcr.io/token?scope=repository:${repo}:pull&service=ghcr.io" | jq -r '.token // empty')"
-          if [ -z "$token" ]; then
-            echo "::warning::ghcr.io/${repo} is not anonymously pullable. Set the package visibility to public: https://github.com/orgs/cloudparity/packages/container/scanner/settings"
-            exit 0
-          fi
           for t in $TAGS; do
             tag="${t##*:}"
-            code="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $token" \
-                    -H 'Accept: application/vnd.oci.image.index.v1+json' \
-                    -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
-                    -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json' \
-                    -H 'Accept: application/vnd.docker.distribution.manifest.v2+json' \
-                    "https://ghcr.io/v2/${repo}/manifests/${tag}")"
+            code=000
+            if [ -n "$token" ]; then
+              code="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $token" \
+                      -H 'Accept: application/vnd.oci.image.index.v1+json' \
+                      -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
+                      -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json' \
+                      -H 'Accept: application/vnd.docker.distribution.manifest.v2+json' \
+                      "https://ghcr.io/v2/${repo}/manifests/${tag}")"
+            fi
             if [ "$code" = 200 ]; then
               echo "$t is anonymously pullable"
             else
-              echo "::warning::$t returned HTTP $code to an anonymous pull; the install template will not be able to pull it"
+              echo "::warning::$t returned HTTP $code to an anonymous pull. Set the package to public: $settings"
+              fail=1
             fi
           done
+          if [ "$fail" = 1 ] && [ "$GITHUB_REF_TYPE" = tag ]; then
+            echo "::error::the image for $GITHUB_REF_NAME is published but not anonymously pullable; set the package to public and re-run this workflow and release"
+            exit 1
+          fi
 
       # A software bill of materials for the published image, attached to this run as an
       # artifact (sbom.spdx.json). Not a gate: it costs one step and answers "what is in it".
