@@ -1,12 +1,23 @@
 # Contributing
 
 Open a pull request against `main`. `verify` (`.github/workflows/verify.yml`) must pass before
-it can merge: `gofmt`, `go vet` with and without the `docker` tag, `go test -race ./...`, a
-coverage floor of 85% on every collector, `go build ./...`, and the install-template checks.
-Nothing merges around it.
+it can merge: `gofmt`, `go vet` with and without the `docker` and `testbed` tags,
+`go test ./...` (with a Bicep compiler on `PATH`, so the install template is compiled and
+checked too) and `go build ./...`. Nothing merges around it: `main` is protected so that only a
+pull request can change it, only after `verify` has passed on it, and that applies to
+administrators as well. You can read the setting yourself:
+`gh api repos/cloudparity/scanner/branches/main/protection`.
 
-Before you push, `make hooks` once installs the same checks as `pre-commit` and `pre-push`
-hooks, so you find out locally. `make all` runs `fmt`, `vet`, `lint`, `test` and `build`.
+Before you push, `make hooks` once installs `pre-commit` and `pre-push` hooks that run the same
+checks plus the race detector and a coverage floor of 85% on every collector, so you find out
+locally. Those two are stricter than CI and run only in the hook. `make all` runs `fmt`, `vet`,
+`lint`, `test` and `build`.
+
+Merging to `main` publishes `ghcr.io/cloudparity/scanner:latest` (`.github/workflows/image.yml`);
+pushing a `v*` tag publishes the same image under that tag and a GitHub Release with the binaries
+(`.github/workflows/release.yml`). Both workflows run `go test ./...` on the exact commit they
+publish before they build anything, so a tag on a commit that never went through `verify` still
+cannot publish a failing build.
 
 ## Rules the tests enforce
 

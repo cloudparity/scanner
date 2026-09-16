@@ -1,0 +1,118 @@
+name: release
+# On a v* tag: cross-compile the scanner for five platforms, write SHA256SUMS, and publish a
+# GitHub Release with the binaries attached. The release body says how to verify a download,
+# names the container image digest for the same tag (published by image.yml), and links the
+# permissions the scanner asks for.
+#
+# A tag can point at any commit and never triggers verify, so this job runs `go test ./...` on
+# the tagged commit itself before it builds anything. It also refuses to publish until the
+# image for the same tag is anonymously pullable: a release must never name an image a
+# customer cannot pull.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # create the release and upload its assets
+
+env:
+  IMAGE: ghcr.io/cloudparity/scanner
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: go test
+        run: go test ./...
+
+      # Static (CGO off), -trimpath so the binary does not record the runner's directory
+      # layout, -s -w to drop the symbol table and DWARF. The same flags as the Dockerfile,
+      # so a binary and the image built from one commit contain the same code.
+      - name: build
+        run: |
+          mkdir -p dist
+          for target in linux/amd64 linux/arm64 darwin/arm64 darwin/amd64 windows/amd64; do
+            os="${target%/*}"; arch="${target#*/}"
+            out="dist/scanner_${GITHUB_REF_NAME}_${os}_${arch}"
+            [ "$os" = windows ] && out="$out.exe"
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
+              go build -trimpath -ldflags="-s -w" -o "$out" ./agent/cmd/scanner
+            echo "built $out"
+          done
+          (cd dist && sha256sum scanner_* > SHA256SUMS && cat SHA256SUMS)
+
+      # The image workflow runs on the same tag push, in parallel. Wait for it to publish
+      # :<tag>, asking ghcr.io anonymously - with no credential, exactly as the install template
+      # does - so the digest named below is one a customer can pull. If it is not there within
+      # ten minutes (image.yml failed, or the package is still private), no release is created:
+      # fix that and re-run this workflow.
+      - name: image digest
+        id: image
+        run: |
+          repo="${IMAGE#ghcr.io/}"
+          digest=""
+          for _ in $(seq 1 30); do
+            token="$(curl -sf "https://ghcr.io/token?scope=repository:${repo}:pull&service=ghcr.io" | jq -r '.token // empty')"
+            if [ -n "$token" ]; then
+              digest="$(curl -sI -H "Authorization: Bearer $token" \
+                        -H 'Accept: application/vnd.oci.image.index.v1+json' \
+                        -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
+                        -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json' \
+                        -H 'Accept: application/vnd.docker.distribution.manifest.v2+json' \
+                        "https://ghcr.io/v2/${repo}/manifests/${GITHUB_REF_NAME}" \
+                        | tr -d '\r' | awk 'tolower($1) == "docker-content-digest:" {print $2}')"
+            fi
+            [ -n "$digest" ] && break
+            echo "waiting for $IMAGE:$GITHUB_REF_NAME to be anonymously pullable"
+            sleep 20
+          done
+          if [ -z "$digest" ]; then
+            echo "::error::$IMAGE:$GITHUB_REF_NAME is not anonymously pullable: check the image workflow run for this tag and the package visibility, then re-run this workflow"
+            exit 1
+          fi
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "digest: $digest"
+
+      - name: release notes
+        env:
+          DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          {
+            echo "Built from commit \`$GITHUB_SHA\` with $(go version | awk '{print $3}'):"
+            echo '`CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" ./agent/cmd/scanner`.'
+            echo
+            echo "## Verify a download"
+            echo
+            echo "Download the binary for your platform and \`SHA256SUMS\` into the same directory, then:"
+            echo
+            echo '```sh'
+            echo "sha256sum -c SHA256SUMS --ignore-missing      # macOS: shasum -a 256 -c SHA256SUMS --ignore-missing"
+            echo '```'
+            echo
+            echo "## Container image"
+            echo
+            echo '```sh'
+            echo "docker pull $IMAGE:$tag"
+            echo '```'
+            echo
+            echo "Digest: \`$IMAGE@$DIGEST\`. Pin it in \`deploy/azure/scanner.bicep\` (\`image=\`) or a mirror."
+            echo
+            echo "## Permissions"
+            echo
+            echo "What the scanner asks for and what each grant unlocks:"
+            echo "[docs/permissions.md](https://github.com/${GITHUB_REPOSITORY}/blob/${tag}/docs/permissions.md)."
+          } > notes.md
+          cat notes.md
+
+      - name: publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file notes.md dist/*

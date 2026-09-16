@@ -41,22 +41,26 @@ yourself), `location`, `resourceGroupName`, and `image` / `registryServer` / `re
 for the enterprise that mirrors the image into a private registry (see the comment above `image`
 in `scanner.bicep`).
 
+**Which image runs.** `image` defaults to `ghcr.io/cloudparity/scanner:latest`, the image
+`.github/workflows/image.yml` publishes from every push to `main`. That default is what makes the
+template work with no parameters, but `latest` moves. Once a release exists, pass the release tag
+— `image=ghcr.io/cloudparity/scanner:v0.1.0` — or the digest its release notes name, so a
+redeploy runs the scanner you read the release notes for and nothing newer. The
+[Releases page](https://github.com/cloudparity/scanner/releases) lists the tags.
+
 ## Path 2 — the estate in the console
 
-**Minimum image: a tag built from `main` at or after commit `8c30031` (2026-08-16), the commit
-that taught the scanner to upload.** A scanner built before it has no `-api-url` flag and reads
-neither `PARITY_API_URL` nor `PARITY_API_KEY`; given both, it prints the estate to a stdout this
-job keeps nowhere, exits 0, and you see a successful execution and an empty console. As of this
-writing **no published tag qualifies** — `v8`, the newest, was built 2026-08-14 — so the template's
-default image cannot take this path yet, and two things stop you from finding that out the slow
-way:
+**This path needs a scanner that can upload**: one with the `-api-url` flag, which every image
+built from this repository has (`scanner scan -h` shows it). A scanner without it reads neither
+`PARITY_API_URL` nor `PARITY_API_KEY`; given both, it would print the estate to a stdout this job
+keeps nowhere, exit 0, and you would see a successful execution and an empty console. Two things
+stop that from happening:
 
-- with the default image, the deployment is **refused at validation** (`fail(...)` in
-  `scanner.bicep`, keyed on `var defaultImageUploads`) before anything is created, and the message
-  says why. Pass `image=<a qualifying tag>` to go ahead. When a qualifying tag is published and
-  pinned as the default, that variable flips to `true` and the refusal goes away — CI checks the
-  variable against the pinned image on every pull request, so it cannot claim more than the
-  binary does.
+- `scanner.bicep` declares whether its **default** image can upload (`var defaultImageUploads`).
+  While that is `false`, a deployment that sets `parityApiUrl` with the default image is
+  **refused at validation** (`fail(...)`) before anything is created, and the message says why.
+  Pass a pinned tag — `image=ghcr.io/cloudparity/scanner:<tag>` — to go ahead; a pinned tag is
+  the recommended form on this path anyway.
 - with any image — the default or one you mirrored — the job's command asks the binary for
   `-api-url` before it scans and **exits 1** if the flag is missing. An execution that shows as
   failed within seconds of starting on this path is that check; `az containerapp job execution
@@ -145,7 +149,10 @@ absence is explained where it would otherwise appear in `scanner.bicep` and
 `az bicep build --file scanner.bicep` compiles it. `go test ./deploy/azure/` from the repo root
 compiles both files and checks the job declares the parameters and environment above, that the
 upload command probes the binary first, and that the subscription template refuses `parityApiUrl`
-with a default image that cannot upload (it skips when no Bicep compiler is installed). CI does
-both on every pull request and additionally checks that the default image tag exists, is
-anonymously pullable, and can or cannot upload exactly as `var defaultImageUploads` in
-`scanner.bicep` says — by pulling it and running `scan -h`.
+with a default image that cannot upload. It skips when no Bicep compiler is installed, so install
+one (`az bicep install`) to run it for real; CI puts a pinned `bicep` on `PATH` and runs it on
+every pull request. `.github/workflows/image.yml` checks, after every push of the image, that the
+tag it published is anonymously pullable — the template grants the job no registry credential, so
+if that check cannot see the image, neither can your deployment. On `main` that is a warning; on
+a release tag it fails the workflow, and `.github/workflows/release.yml` will not publish a
+release until the image for its tag is pullable.

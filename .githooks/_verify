@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 # Shared local verification for the scanner git hooks (see CONTRIBUTING.md).
 #
-# Fast local feedback ONLY. The real enforcement is the required 'verify' check plus branch
-# protection — a hook is bypassable, especially by an agent — so every gate here also lives
-# in .github/workflows/verify.yml. If you add one, add it there too or it is theatre.
+# Fast local feedback ONLY. A hook is bypassable (--no-verify, or an agent that never installed
+# it), so the enforcement that binds is branch protection on main: it requires the 'verify'
+# check (.github/workflows/verify.yml) and a pull request, administrators included.
+#
+# What that check enforces is gofmt, go vet (both tag sets), go test and go build - the first
+# four gates below. The race detector and the coverage floor are stricter than CI: they run
+# here only, so a commit that fails them can still merge. If a gate is meant to bind, it goes
+# in verify.yml; a hook-only gate is a convenience, not a guarantee.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
@@ -19,13 +24,15 @@ fi
 
 echo "[$stage] go vet"; go vet ./...
 
-# A build tag hides a file from the line above, so the Postgres container tests compile nowhere
-# until someone runs them by hand. Vetting with the tag is a compile and needs no Docker daemon;
-# `go test -tags docker` does need one and stays out of every gate, local and remote alike.
-echo "[$stage] go vet -tags docker"; go vet -tags docker ./...
+# A build tag hides a file from the line above, so the Postgres container tests (docker) and the
+# real-Azure-disk test (testbed) compile nowhere until someone runs them by hand. Vetting with the
+# tags is a compile and needs no Docker daemon; `go test -tags docker` does need one and stays out
+# of every gate, local and remote alike. The same two tags as verify.yml and `make vet`.
+echo "[$stage] go vet -tags docker,testbed"; go vet -tags docker,testbed ./...
 
 # -race because the collector pages a remote API and will fetch children concurrently: a
-# data race found at commit time costs a minute rather than a wrong recovery plan.
+# data race found at commit time costs a minute rather than a wrong recovery plan. Local only:
+# CI runs `go test ./...` without it.
 echo "[$stage] go test -race"; go test -race ./...
 
 # The floor is on the COLLECTOR, not the module. Gating the module total would average in
@@ -35,6 +42,7 @@ echo "[$stage] go test -race"; go test -race ./...
 # EVERY collector, not just azure. The floor was hardcoded to the azure package, so the k8s
 # collector landed at 60.8% and nothing objected - coverage that is not enforced is not coverage.
 # Discovered rather than listed, so the next collector is covered the moment it exists.
+# Local only, like -race: CI does not measure coverage.
 profile="$(mktemp)"   # not `mktemp -t tmpl`: GNU coreutils rejects a template without XXX
 trap 'rm -f "$profile"' EXIT
 for pkg in ./agent/internal/collectors/*/; do
