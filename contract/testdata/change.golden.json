@@ -1,0 +1,78 @@
+[
+  {
+    "position": "0/1A2B000",
+    "op": "insert",
+    "schema": "sales",
+    "table": "customers",
+    "key": [
+      "id"
+    ],
+    "row": {
+      "created_at": "2026-01-01 00:00:00+00",
+      "email": "c1@spike.test",
+      "id": "999001",
+      "name": "c1 spike"
+    }
+  },
+  {
+    "position": "0/1A2B0C8",
+    "op": "update",
+    "schema": "sales",
+    "table": "customers",
+    "key": [
+      "id"
+    ],
+    "row": {
+      "created_at": "2026-01-01 00:00:00+00",
+      "email": "c1@spike.test",
+      "id": "999001",
+      "name": "c1 spike updated"
+    }
+  },
+  {
+    "position": "0/1A2B190",
+    "op": "delete",
+    "schema": "sales",
+    "table": "customers",
+    "key": [
+      "id"
+    ],
+    "row": {
+      "id": "999001"
+    }
+  },
+  {
+    "position": "0/1A2B200",
+    "op": "update",
+    "schema": "ops",
+    "table": "daily_totals",
+    "key": [
+      "day",
+      "customer_id"
+    ],
+    "row": {
+      "customer_id": "7",
+      "day": "2026-01-01",
+      "order_count": null
+    }
+  },
+  {
+    "position": "0/1A2B280",
+    "op": "update",
+    "schema": "ops",
+    "table": "daily_totals",
+    "key": [
+      "day",
+      "customer_id"
+    ],
+    "row": {
+      "customer_id": "7",
+      "day": "2026-01-02",
+      "order_count": "3"
+    },
+    "oldKey": {
+      "customer_id": "7",
+      "day": "2026-01-01"
+    }
+  }
+]

@@ -1,0 +1,53 @@
+{
+  "contractVersion": 1,
+  "scan": {
+    "provider": "azure",
+    "account": "sub-1",
+    "scannedAt": "2026-08-11T12:00:00Z",
+    "collector": "azure/0.1.0",
+    "resourceCount": 1,
+    "gaps": [
+      {
+        "reason": "data-plane",
+        "target": "/subscriptions/sub-1/resourcegroups/rg/providers/microsoft.keyvault/vaults/kv1",
+        "detail": "secret values are data-plane; names are visible, values are not"
+      }
+    ]
+  },
+  "resources": [
+    {
+      "provider": "azure",
+      "id": "/subscriptions/sub-1/resourcegroups/rg/providers/microsoft.keyvault/vaults/kv1",
+      "type": "microsoft.keyvault/vaults",
+      "name": "kv1",
+      "account": "sub-1",
+      "group": "rg",
+      "region": "eastus",
+      "tags": {
+        "tier": "prod"
+      },
+      "document": {
+        "properties": {
+          "enableSoftDelete": true
+        },
+        "sku": {
+          "name": "standard"
+        }
+      },
+      "redactions": [
+        {
+          "path": "properties.connectionString",
+          "reason": "credential-bearing value"
+        }
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "from": "/subscriptions/sub-1/resourcegroups/rg/providers/microsoft.keyvault/vaults/kv1",
+      "to": "/subscriptions/sub-1/resourcegroups/rg/providers/microsoft.network/virtualnetworks/vnet1/subnets/db",
+      "via": "properties.networkAcls.virtualNetworkRules[0].id",
+      "resolution": "child-of-scanned"
+    }
+  ]
+}

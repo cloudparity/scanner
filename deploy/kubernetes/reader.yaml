@@ -1,0 +1,118 @@
+# The permission ask for the application plane, and the whole of it.
+#
+# One ClusterRole with a single verb. AD-024 puts this collector INSIDE the cluster precisely so the
+# ask can look like this: no cluster credentials leave the customer's tenant, listClusterUserCredential
+# is never called, and a reviewer can read the entire grant in one screen.
+#
+# WHY list AND NOT get. The collector only ever reads whole collections, so `get` would be a permission
+# it never uses - and `watch` would let it hold an open stream, which a read-only config scanner has no
+# business doing. Narrower than `view`, which is Kubernetes' own read-only role: `view` grants get and
+# watch on everything the API serves, including kinds this collector does not read.
+#
+# WHAT THIS DOES NOT GRANT, deliberately:
+#   - no secrets VALUES leave the cluster. The role does grant list on secrets, because a Secret's
+#     NAME and its keys are configuration a restore needs; the collector strips every value at the
+#     boundary before anything is stored. Values cannot be withheld at the RBAC layer - a list of
+#     secrets returns data whether we want it or not - so this is enforced in code and declared in
+#     the estate, not assumed.
+#   - no write verb of any kind: no create, update, patch, delete, deletecollection.
+#   - no exec, no proxy, no portforward, no impersonate.
+#   - no pods or replicasets. They are controller output, recreated from the specs this reads, so
+#     restoring them would fight the controller that owns them.
+#
+# Generated from kinds() in agent/internal/collectors/k8s/kinds.go and asserted against it by
+# TestReaderManifestCoversEveryKind, so a kind added in code cannot silently outrun the permission a
+# customer actually granted.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: parity-scanner
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: parity-scanner
+  namespace: parity-scanner
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: parity-scanner-reader
+rules:
+  # core
+  - apiGroups: [""]
+    resources:
+      - configmaps
+      - namespaces
+      - persistentvolumeclaims
+      - persistentvolumes
+      - secrets
+      - serviceaccounts
+      - services
+    verbs: ["list"]
+  # apps
+  - apiGroups: ["apps"]
+    resources:
+      - daemonsets
+      - deployments
+      - statefulsets
+    verbs: ["list"]
+  # autoscaling
+  - apiGroups: ["autoscaling"]
+    resources:
+      - horizontalpodautoscalers
+    verbs: ["list"]
+  # batch
+  - apiGroups: ["batch"]
+    resources:
+      - cronjobs
+      - jobs
+    verbs: ["list"]
+  # networking.k8s.io
+  - apiGroups: ["networking.k8s.io"]
+    resources:
+      - ingressclasses
+      - ingresses
+      - networkpolicies
+    verbs: ["list"]
+  # node.k8s.io
+  - apiGroups: ["node.k8s.io"]
+    resources:
+      - runtimeclasses
+    verbs: ["list"]
+  # policy
+  - apiGroups: ["policy"]
+    resources:
+      - poddisruptionbudgets
+    verbs: ["list"]
+  # rbac.authorization.k8s.io
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources:
+      - clusterrolebindings
+      - clusterroles
+      - rolebindings
+      - roles
+    verbs: ["list"]
+  # scheduling.k8s.io
+  - apiGroups: ["scheduling.k8s.io"]
+    resources:
+      - priorityclasses
+    verbs: ["list"]
+  # storage.k8s.io
+  - apiGroups: ["storage.k8s.io"]
+    resources:
+      - storageclasses
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: parity-scanner-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: parity-scanner-reader
+subjects:
+  - kind: ServiceAccount
+    name: parity-scanner
+    namespace: parity-scanner

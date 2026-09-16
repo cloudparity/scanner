@@ -1,0 +1,79 @@
+{
+  "contractVersion": 1,
+  "chain": "install-7/pg1/orders",
+  "account": "/subscriptions/sub-1",
+  "at": "2026-08-14T09:14:02Z",
+  "manifest": {
+    "contractVersion": 1,
+    "kind": "base",
+    "source": {
+      "provider": "azure",
+      "resourceId": "/subscriptions/sub-1/resourcegroups/rg/providers/microsoft.dbforpostgresql/flexibleservers/pg1",
+      "account": "/subscriptions/sub-1",
+      "database": "orders",
+      "engine": "postgres",
+      "engineVersion": "16"
+    },
+    "readPoint": {
+      "at": "2026-08-14T09:14:00Z",
+      "position": "0/1A2B3C8"
+    },
+    "schema": "9f2c4b1e7a03d568",
+    "artifact": {
+      "format": "pg_dump/custom",
+      "bytes": 1053825,
+      "sha256": "",
+      "parts": [
+        {
+          "path": "pg1/orders/2026-08-14T09-14-00Z/database.sql",
+          "bytes": 1048576,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "format": "pg_dump/custom",
+          "role": "database"
+        },
+        {
+          "path": "pg1/orders/2026-08-14T09-14-00Z/roles.sql",
+          "bytes": 793,
+          "sha256": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
+          "format": "sql/plain",
+          "role": "roles"
+        },
+        {
+          "path": "pg1/orders/2026-08-14T09-14-00Z/schema.sql",
+          "bytes": 4096,
+          "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+          "format": "sql/plain",
+          "role": "schema"
+        },
+        {
+          "path": "pg1/orders/2026-08-14T09-14-00Z/tablespaces.sql",
+          "bytes": 360,
+          "sha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+          "format": "sql/plain",
+          "role": "tablespaces"
+        }
+      ]
+    },
+    "producer": {
+      "agent": "azure/0.1.0",
+      "tool": "pg_dump 16.4",
+      "args": [
+        "--format=custom",
+        "--no-owner"
+      ]
+    },
+    "transfer": "provider-copy",
+    "skipped": [
+      {
+        "reason": "permission-denied",
+        "target": "reporting",
+        "detail": "no connect privilege on database reporting; it is not in this backup"
+      }
+    ]
+  },
+  "slot": {
+    "retainedBytes": 16777216,
+    "diskFreeBytes": 91268055040,
+    "diskTotalBytes": 137438953472
+  }
+}

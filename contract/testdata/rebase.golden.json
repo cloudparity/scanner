@@ -1,0 +1,7 @@
+{
+  "contractVersion": 1,
+  "at": "2026-08-14T09:31:07Z",
+  "reason": "schema-changed",
+  "recoverable": "0/1A2B3C8",
+  "detail": "the chain's base was captured against schema 9f2c4b1e7a03d568 and this cycle against 4d1e88ba90c3f712"
+}

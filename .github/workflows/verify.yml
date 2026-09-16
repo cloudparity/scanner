@@ -1,0 +1,203 @@
+name: verify
+# The REAL enforcement: required status check on PRs. A local `--no-verify` cannot bypass this,
+# because branch protection blocks merging to main until this passes.
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          # Read from go.mod so CI can never drift from the module's requirement.
+          go-version-file: go.mod
+          cache: false
+      - name: gofmt
+        # Block scalar, not an inline string: the previous one-liner contained
+        # "run: make fmt", and that colon-space made YAML read it as a nested
+        # mapping. The whole workflow was invalid, so it never ran a single step.
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "$unformatted"
+            echo "not gofmt-clean - fix with: make fmt"
+            exit 1
+          fi
+      - run: go vet ./...
+      # A build tag makes a file invisible to the line above, so the Postgres container tests
+      # would compile nowhere until someone ran them by hand — and rot in between. Vetting with
+      # the tag is a compile, so it needs no Docker daemon and belongs in the required check;
+      # `go test -tags docker` does need one, and deliberately stays out.
+      - run: go vet -tags docker ./...
+      # -race and the coverage floor live HERE, not only in .githooks/_verify. A local hook
+      # is bypassable; this is the required check, so this is where a gate actually binds.
+      - name: test with the race detector
+        run: go test -race ./...
+      # The floor is on the collector, not the module: a module total would average in
+      # main.go's wiring and the plan stub.
+      # EVERY collector. Hardcoding the azure package let the k8s collector land at 60.8% with
+      # nothing objecting, which is how an unenforced floor fails: silently, and only for new code.
+      - name: coverage floor (every collector)
+        run: |
+          min=85
+          fail=0
+          for pkg in ./agent/internal/collectors/*/; do
+            ls "$pkg"*_test.go >/dev/null 2>&1 || continue
+            go test -coverprofile=coverage.out "$pkg"
+            pct="$(go tool cover -func=coverage.out | awk '/^total:/ {gsub(/%/,"",$3); print $3}')"
+            echo "$pkg coverage ${pct}% (floor ${min}%)"
+            if [ "${pct%.*}" -lt "$min" ]; then
+              echo "  $pkg is below the floor"
+              fail=1
+            fi
+          done
+          exit $fail
+      - run: go build ./...
+
+  # The install template a customer runs, checked on every PR.
+  #
+  # Two bugs made this necessary, both shipped and both caught only by deploying:
+  #
+  #   1. the default image tag pointed at ghcr.io/.../parity-scanner:v1 - a tag that did not
+  #      exist - which surfaces nine minutes into a customer's deployment as "unable to pull
+  #      image using Managed identity", not as a bad parameter
+  #   2. it later pointed at a tag that DID exist but predated the ARM child fetcher and the
+  #      endpoint index, so a customer would have installed a scanner reporting thirteen gaps
+  #      instead of six
+  #   3. (caught in review, not by a customer) the template gained parityApiUrl while every
+  #      published tag predated the upload code, so the job it deployed would have read neither
+  #      variable, printed the estate to a stdout kept nowhere, and exited 0 - the template
+  #      declared everything right and the binary did none of it
+  #
+  # None is a Go bug, so `verify` never saw them. The template pins an image, which is a hard
+  # dependency on a scanner build, and this job is what makes that dependency enforceable.
+  install-template:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Compiling is not the same as being deployable, but a template that does not compile
+      # cannot be deployed at all, so it is the cheap first gate.
+      - name: bicep build
+        run: |
+          curl -sLo bicep https://github.com/Azure/bicep/releases/latest/download/bicep-linux-x64
+          chmod +x bicep && sudo mv bicep /usr/local/bin/bicep
+          # Positional input file. `--file` is the `az bicep build` wrapper's syntax; the
+          # standalone binary rejects it with "Unrecognized parameter --file".
+          bicep build deploy/azure/scanner.bicep --outfile /tmp/scanner.json
+          echo "compiled $(wc -c < /tmp/scanner.json) bytes"
+
+      # What the compiled job DECLARES: the upload parameters exist and default to off, the key
+      # reaches the container only as a Key Vault secret reference, never a flag or a parameter.
+      # This is the one job with a Bicep compiler on PATH, so this is where the test runs for
+      # real; under `go test ./...` in the verify job above it skips.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: the template must declare what the scanner reads
+        run: go test ./deploy/azure/ -v
+
+      # THE check. Resolve the default image tag against the registry and fail if it is absent.
+      # Anonymous, because the published image must be anonymously pullable - the template grants
+      # the job no registry credential at all, so if this cannot see it, neither can a customer.
+      - name: the default image tag must exist and be publicly pullable
+        run: |
+          image="$(grep -oE "param image string = '[^']+'" deploy/azure/scanner.bicep \
+                   | sed "s/.*'\(.*\)'/\1/")"
+          if [ -z "$image" ]; then
+            echo "could not find the image parameter default in deploy/azure/scanner.bicep"
+            exit 1
+          fi
+          echo "default image: $image"
+          case "$image" in
+            ghcr.io/*) : ;;
+            *) echo "only ghcr.io defaults are checked by this job; got $image"; exit 1 ;;
+          esac
+          repo="${image#ghcr.io/}"; tag="${repo##*:}"; repo="${repo%:*}"
+          echo "repo=$repo tag=$tag"
+          token="$(curl -sf "https://ghcr.io/token?scope=repository:${repo}:pull&service=ghcr.io" \
+                   | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')"
+          if [ -z "$token" ]; then
+            echo "ghcr refused an anonymous pull token for ${repo} - the package is private"
+            exit 1
+          fi
+          code="$(curl -s -o /tmp/manifest.json -w '%{http_code}' \
+                  -H "Authorization: Bearer $token" \
+                  -H 'Accept: application/vnd.oci.image.index.v1+json' \
+                  -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json' \
+                  -H 'Accept: application/vnd.docker.distribution.manifest.v2+json' \
+                  "https://ghcr.io/v2/${repo}/manifests/${tag}")"
+          if [ "$code" != "200" ]; then
+            echo "ghcr returned HTTP $code for ${repo}:${tag} - the tag the template installs by"
+            echo "default does not exist, so every customer deployment would fail on image pull"
+            exit 1
+          fi
+          echo "${repo}:${tag} exists and is anonymously pullable"
+
+      # A tag that exists is not a tag that can do what the template asks of it (bug 3 above).
+      # scanner.bicep declares whether the default image can upload - `var defaultImageUploads` -
+      # and refuses parityApiUrl with the default image while that is false. This step holds
+      # the declaration to the binary: pull the pinned image, ask the scanner for its flags, and
+      # fail if the two disagree in EITHER direction. A tag bump that forgot the flag keeps
+      # refusing uploads that would work; a flag flipped without the tag bump ships the silent
+      # no-op the guard exists to prevent. `scan -h` needs no cloud and no credential.
+      - name: the default image must be able to do what the template declares
+        run: |
+          image="$(grep -oE "param image string = '[^']+'" deploy/azure/scanner.bicep \
+                   | sed "s/.*'\(.*\)'/\1/")"
+          declared="$(sed 's://.*::' deploy/azure/scanner.bicep \
+                      | grep -oE "^var defaultImageUploads = (true|false)" | awk '{print $4}')"
+          if [ -z "$declared" ]; then
+            echo "deploy/azure/scanner.bicep does not declare 'var defaultImageUploads = true|false'"
+            exit 1
+          fi
+          docker pull --quiet --platform linux/amd64 "$image"
+          if docker run --rm --platform linux/amd64 "$image" scan -h 2>&1 | grep -q -- -api-url; then
+            actual=true
+          else
+            actual=false
+          fi
+          echo "scanner.bicep says defaultImageUploads=$declared; $image accepts -api-url: $actual"
+          if [ "$declared" != "$actual" ]; then
+            if [ "$actual" = true ]; then
+              echo "the pinned image can upload but the template still refuses parityApiUrl with it:"
+              echo "set 'var defaultImageUploads = true' in deploy/azure/scanner.bicep"
+            else
+              echo "the template promises the pinned image can upload, but its scanner has no -api-url"
+              echo "flag: it would ignore PARITY_API_URL and deliver nothing. Pin a tag built from main"
+              echo "at or after 8c30031, or set 'var defaultImageUploads = false'"
+            fi
+            exit 1
+          fi
+
+      # The template's parameters and the scanner's flags have to move together. --exclude-groups
+      # was added to both in one PR; nothing stopped a later change touching only one.
+      - name: the template must pass the flags the scanner defines
+        run: |
+          fail=0
+          for flag in --subscription --exclude-groups; do
+            grep -q -- "$flag" deploy/azure/scanner-resources.bicep || {
+              echo "the job command in scanner-resources.bicep does not pass $flag"
+              fail=1
+            }
+            grep -q -- "\"${flag#--}\"" agent/cmd/scanner/main.go || {
+              echo "the scanner does not define ${flag}"
+              fail=1
+            }
+          done
+          # A literal 'none' here fails ARM preflight: the way to say none is to OMIT the block.
+          # Comment lines are stripped first - the naive grep matched the comment that EXPLAINS
+          # this rule and failed the build on its own documentation.
+          if sed 's://.*::' deploy/azure/scanner-resources.bicep | grep -q "destination: 'none'"; then
+            echo "appLogsConfiguration destination 'none' is rejected by ARM preflight"
+            echo "omit the appLogsConfiguration block instead"
+            fail=1
+          fi
+          exit $fail

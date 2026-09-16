@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Catches commits made with `commit --no-verify` before they leave the laptop.
+exec "$(git rev-parse --show-toplevel)/.githooks/_verify" pre-push

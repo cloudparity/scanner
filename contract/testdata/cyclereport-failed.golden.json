@@ -1,0 +1,9 @@
+{
+  "contractVersion": 1,
+  "chain": "install-7/pg1/orders",
+  "account": "/subscriptions/sub-1",
+  "at": "2026-08-14T10:14:02Z",
+  "failure": {
+    "detail": "connect to pg1.postgres.database.azure.com:5432: dial tcp: i/o timeout"
+  }
+}

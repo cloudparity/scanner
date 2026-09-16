@@ -1,0 +1,11 @@
+# build outputs
+/bin/
+/dist/
+*.exe
+
+# local noise
+.DS_Store
+
+# An optional module download cache staged into the docker build context (Dockerfile
+# COPY .gomodcach[e]). Generated from ~/go/pkg/mod, never a source file.
+/.gomodcache/

@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Shared local verification for the scanner git hooks (see CONTRIBUTING.md).
+#
+# Fast local feedback ONLY. The real enforcement is the required 'verify' check plus branch
+# protection — a hook is bypassable, especially by an agent — so every gate here also lives
+# in .github/workflows/verify.yml. If you add one, add it there too or it is theatre.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+stage="${1:-local}"
+MIN_COVERAGE=85   # percent of statements; raise it, do not lower it silently
+
+echo "[$stage] gofmt"
+unformatted="$(gofmt -l .)"
+if [ -n "$unformatted" ]; then
+  echo "  needs gofmt:"; echo "$unformatted" | sed 's/^/    /'
+  echo "  run: make fmt"; exit 1
+fi
+
+echo "[$stage] go vet"; go vet ./...
+
+# A build tag hides a file from the line above, so the Postgres container tests compile nowhere
+# until someone runs them by hand. Vetting with the tag is a compile and needs no Docker daemon;
+# `go test -tags docker` does need one and stays out of every gate, local and remote alike.
+echo "[$stage] go vet -tags docker"; go vet -tags docker ./...
+
+# -race because the collector pages a remote API and will fetch children concurrently: a
+# data race found at commit time costs a minute rather than a wrong recovery plan.
+echo "[$stage] go test -race"; go test -race ./...
+
+# The floor is on the COLLECTOR, not the module. Gating the module total would average in
+# main.go's wiring and the plan stub, so the number would move for reasons unrelated to the
+# code that turns a cloud into an estate. Translation is pure string handling where an
+# untested branch produces a graph that looks right and matches nothing.
+# EVERY collector, not just azure. The floor was hardcoded to the azure package, so the k8s
+# collector landed at 60.8% and nothing objected - coverage that is not enforced is not coverage.
+# Discovered rather than listed, so the next collector is covered the moment it exists.
+profile="$(mktemp)"   # not `mktemp -t tmpl`: GNU coreutils rejects a template without XXX
+trap 'rm -f "$profile"' EXIT
+for pkg in ./agent/internal/collectors/*/; do
+  # collectors/ itself holds only the interface; a directory with no test files has nothing to gate.
+  ls "$pkg"*_test.go >/dev/null 2>&1 || continue
+  echo "[$stage] coverage ($pkg)"
+  go test -coverprofile="$profile" "$pkg" >/dev/null
+  pct="$(go tool cover -func="$profile" | awk '/^total:/ {gsub(/%/,"",$3); print $3}')"
+  if [ "${pct%.*}" -lt "$MIN_COVERAGE" ]; then
+    echo "  coverage ${pct}% is below the ${MIN_COVERAGE}% floor"
+    echo "  see what is untested: go tool cover -html=$profile"
+    exit 1
+  fi
+  echo "  coverage ${pct}% (floor ${MIN_COVERAGE}%)"
+done
+
+echo "[$stage] go build"; go build -o /dev/null ./agent/cmd/scanner
+echo "[$stage] OK"

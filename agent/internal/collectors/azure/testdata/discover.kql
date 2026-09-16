@@ -1,0 +1,3 @@
+resources
+| extend apiVersion = apiVersion
+| order by id asc
