@@ -35,15 +35,15 @@ that make that true. If you can get past one of them, that is a report.
 |---|---|
 | The upload goes to `https://` only, or not at all | `agent/internal/upload/upload.go:43-48`: `New` returns an error for any URL not starting `https://`, localhost included, and `scan` checks this before it reads anything |
 | The API key is in a header, never the URL, the body, or an error | `agent/internal/upload/upload.go:27` (`KeyHeader`), `upload.go:87` (the one place it is set); `upload_test.go` asserts it appears in neither the URL, the body nor any error text |
-| Known secret-bearing fields are removed before the document is written, and each removal is recorded | `agent/internal/collectors/azure/translate.go:278-285` (`redactionRules`), applied in `redactedDocument` at `translate.go:292`; every hit becomes a `contract.Redaction` on the resource (`contract/estate.go:111-113`) |
+| Known secret-bearing fields are removed before the document is written, and each removal is recorded | `agent/internal/collectors/azure/translate.go:290-297` (`redactionRules`), applied in `redactedDocument` at `translate.go:304`; every hit becomes a `contract.Redaction` on the resource (`contract/estate.go:118-121`) |
 | Kubernetes Secret values never leave the cluster | `agent/internal/collectors/k8s/translate.go:274` (`scrub`) strips `data` and `stringData` and records each key as a redaction; `deploy/kubernetes/reader.yaml` grants `list` and no write verb |
-| A field that looks like a credential and was not on the list is flagged, not silently shipped | `agent/internal/collectors/azure/screen.go:68` and `agent/internal/collectors/k8s/screen.go:77` add a gap of reason `unscreened` (`contract/estate.go:244`) naming the paths |
+| A field that looks like a credential and was not on the list is flagged, not silently shipped | `agent/internal/collectors/azure/screen.go:68` and `agent/internal/collectors/k8s/screen.go:77` add a gap of reason `unscreened` (`contract/estate.go:255`) naming the paths |
 | Key Vault: names and metadata, never a value | `agent/internal/collectors/azure/keyvault.go:56`: the struct the list response decodes into has no value field; `keyvault.go:306` is the only request, a `GET` on the list endpoint, which returns none |
 | `scan` and `scan-cluster` make no write call | `grep -rn 'http.Method\(Post\|Put\|Delete\|Patch\)' --include='*.go' --exclude='*_test.go' .` returns only the upload client and the `backup`/`prune` pipeline; the collectors under `agent/internal/collectors/` contain none |
-| The install template grants one role on the subscription | `deploy/azure/scanner.bicep:107` is the only `roleDefinitions` reference in the subscription-scope template: Reader, `acdd72a7-3385-48ef-bd42-f606fba81ae7`. The one other assignment in the tree, AcrPull at `deploy/azure/scanner-resources.bicep:70`, is scoped to a registry you own and made only when you pass `registryResourceId` to mirror the image |
+| The install template grants one role on the subscription | `deploy/azure/scanner.bicep:106` is the only `roleDefinitions` reference in the subscription-scope template: Reader, `acdd72a7-3385-48ef-bd42-f606fba81ae7`. The one other assignment in the tree, AcrPull at `deploy/azure/scanner-resources.bicep:76`, is scoped to a registry you own and made only when you pass `registryResourceId` to mirror the image |
 | The shipped container has no shell | root `Dockerfile`: `FROM scratch`, `USER 65534:65534`, one binary and a CA bundle |
 
-Anything the scanner could not read is recorded as a gap with a reason (`contract/estate.go:198-244`)
+Anything the scanner could not read is recorded as a gap with a reason (`contract/estate.go:188-255`)
 rather than dropped, so an estate never claims more than it holds.
 
 ## What the `backup` subcommand does that `scan` does not

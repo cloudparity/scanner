@@ -8,242 +8,121 @@
 [![Go version](https://img.shields.io/github/go-mod/go-version/cloudparity/scanner)](go.mod)
 [![License](https://img.shields.io/github/license/cloudparity/scanner)](LICENSE)
 
-The scanner is the part of Cloud Parity that runs inside your cloud. It reads the configuration
-of an Azure subscription, or of a Kubernetes cluster from inside it, and writes one JSON document
-called an *estate*: every resource, the references between them, what was redacted, and every
-place it could not look. The Cloud Parity console reads estates to work out what a region loss
-would take with it and what it would take to rebuild.
+The scanner is the part of Cloud Parity that runs inside your cloud. It reads an Azure
+subscription, or a Kubernetes cluster from inside it, and writes what it finds as one JSON
+document you can read. It is for the platform or security engineer who has to decide whether
+that is safe to run on production.
 
-It reads. It does not restore, and `scanner scan` does not write anything to your cloud. The one
-subcommand that writes, `backup`, is described in its own section below so you do not have to
-find out from the code.
+You cannot rebuild what you cannot see. A recovery plan built from a dashboard is a guess: the
+dashboard shows each resource on its own, and the outage takes them together. The scanner gives
+you your whole subscription as one document, an *estate*: every resource, the references
+between them, what was redacted, and every place it could not look. From it the Cloud Parity
+console gives you back a recovery plan, the order it rebuilds in, and a coverage verdict that
+names what cannot be put back. It reads. It does not restore. The promise is short: metadata
+only; `scan` and `scan-cluster` write nothing to your cloud; one built-in role; and you can read
+the code that keeps it, because you are looking at it. The subcommands that do write, `backup`
+and `prune`, are a separate PostgreSQL backup pipeline that cannot run unless you configure it,
+and `prune` is a dry run unless you pass `--apply`: [docs/cli.md](docs/cli.md#backup-and-prune-the-one-thing-that-writes).
 
-## What it needs
+## See your recovery plan in three steps
 
-One built-in role: **Reader** at subscription scope. The install template
-(`deploy/azure/scanner.bicep`) makes exactly that one role assignment. Anything beyond it is
-optional, opt-in, and recorded as a gap in the estate when it is missing. The full table is
-[docs/permissions.md](docs/permissions.md).
+1. **[Sign up at app.cloudparity.net/signup](https://app.cloudparity.net/signup)** with an email
+   address and a company name, then mint a key on the *Run it yourself* page; it is listed under
+   *Settings › API keys*.
+2. Run the scanner, signed in as a principal that holds Reader on the subscription:
 
-For a cluster, one `ClusterRole` with a single verb, `list`, on the kinds the collector reads:
-[deploy/kubernetes/reader.yaml](deploy/kubernetes/reader.yaml). A test
-(`TestReaderManifestCoversEveryKind`) holds that file equal to the kinds in the code.
+   ```sh
+   az login
+   export PARITY_API_URL=https://api.cloudparity.net
+   export PARITY_API_KEY=<the key from step 1>
+   scanner scan --subscription <subscription id>
+   ```
 
-## What leaves your tenant
+   Leave the two variables unset and the estate goes to stdout instead, so you can read it
+   before anything leaves. To run it as a job inside your subscription instead, with the key in
+   a Key Vault you own, deploy the template: [deploy/azure/README.md](deploy/azure/README.md).
+3. Open your plan in the console. Pick what you want back and see what comes with it, the order
+   it rebuilds in, and what cannot be put back, named.
 
-By default, nothing. `scanner scan` prints the estate to stdout and exits. The install template
-writes it to a file share in a storage account you own. Read it before you send it anywhere.
+## What leaves your tenant, and what never does
 
-If you set `PARITY_API_URL` (or `--api-url`), the scanner POSTs the estate to
-`$PARITY_API_URL/v1/scans` with the key from `PARITY_API_KEY` in a request header. The URL must be
-`https://`; `agent/internal/upload/upload.go:43-48` refuses anything else, including localhost.
+By default, nothing: `scanner scan` prints the estate to stdout and exits, and the install
+template writes it to a file share in a storage account you own. It uploads only when you set
+`PARITY_API_URL`, only over `https://`, with the key in a request header and nowhere else.
 
-The estate carries each resource's configuration document as the cloud API returned it, minus
-the values on a redaction list. Both halves of that sentence matter:
+| Leaves your tenant, when you say so | Never leaves, by construction |
+|---|---|
+| Each resource's configuration as the cloud API returned it, minus the values on the redaction list | Your data: not a blob, not a row, not a volume. The one data-plane role a scan ever asks for, Key Vault Reader, returns names and not values |
+| The references between resources, as the ARM ids one document names | App settings, connection strings, administrator passwords, account keys: replaced before the document is written, each removal recorded with its path |
+| A record of every redaction and every place the scan could not look, with the reason | Key Vault secret values: names and metadata only, from a call with no value field and a role that cannot get one |
+| The subscription id, the resource ids, the scan time and the collector version | Kubernetes Secret values: stripped in code, each key recorded |
 
-- **Redacted, and recorded.** App Service app settings and connection strings, database
-  administrator passwords, and storage/account keys (`properties.*.primaryKey`, `secondaryKey`,
-  `accessKey`) are replaced before the document is written, and each removal is listed in
-  `resource.redactions` with its path and reason. The list is
-  `agent/internal/collectors/azure/translate.go:278-285`. Kubernetes Secret values (`data`,
-  `stringData`) are stripped at the same boundary: `agent/internal/collectors/k8s/translate.go:274`.
-- **Flagged, not redacted.** Anything that looks like a credential but is not on the list ships
-  as-is and the resource gets a gap of reason `unscreened` naming the field paths
-  (`agent/internal/collectors/azure/screen.go`, `agent/internal/collectors/k8s/screen.go`). An
-  Application Insights `InstrumentationKey` is the common case. The scanner does not guess: a
-  regex sweep would also blank `keyVaultUri` and `sshPublicKey`, which are the join keys the
-  dependency graph is built from. If a flagged field is a secret to you, tell us and it moves to
-  the list.
-- **Key Vault: names, never values.** The collector lists secret names and metadata from the
-  vault data plane. The call it makes (`GET {vault}/secrets`) has no value field, and the role it
-  asks for, Key Vault Reader, does not include `getSecret`. `agent/internal/collectors/azure/keyvault.go:56`
-  is the struct the response is decoded into; it has no value field to decode into.
-
-The endpoints the binary connects to during `scan`: `login.microsoftonline.com` (token),
-`management.azure.com` (Resource Graph and ARM), `*.vault.azure.net` (secret names, when the
-role is granted), and `PARITY_API_URL` if you set it. During `scan-cluster`: the cluster's own
-API server, `login.microsoftonline.com` when the token for it comes from Entra rather than the
-pod's projected service-account token, and `PARITY_API_URL` if set. Nothing else.
+One built-in role does it: **Reader** at subscription scope, and the install template makes
+exactly that one assignment on the subscription. For a cluster, one `ClusterRole` with a single
+verb, `list`. Anything beyond that is optional and, when it is missing, recorded as a gap that
+names the role that would close it. The manifest of every grant, what it unlocks and what we
+will not ask for is [docs/permissions.md](docs/permissions.md); the redaction rules and the file
+and line that enforce each promise are [docs/redaction.md](docs/redaction.md) and [SECURITY.md](SECURITY.md).
 
 ## Get it
 
 Every release on the [Releases page](https://github.com/cloudparity/scanner/releases) carries a
-static binary for linux/amd64, linux/arm64, darwin/arm64, darwin/amd64 and windows/amd64, plus a
-`SHA256SUMS` file, each with a signed build-provenance attestation. Download the one for your
-platform and check it (see *Verify a release*).
-
-The same commit is published as a container image, the one `deploy/azure/scanner.bicep` runs:
+static binary for linux/amd64, linux/arm64, darwin/arm64, darwin/amd64 and windows/amd64, and
+the same commit is published as the container image the install template runs:
 
 ```sh
 docker pull ghcr.io/cloudparity/scanner:<tag>       # e.g. ghcr.io/cloudparity/scanner:v0.1.0
 ```
 
-`:latest` follows `main`, and every push to `main` is also tagged with its commit sha. Pin a
-release tag, or the digest the release notes name, for anything you run more than once.
-
-## Build from source
-
-Go 1.26 or newer (`go.mod` says `go 1.26.0`; `golang.org/x/crypto` v0.56.0, which fixes the last of
-the open advisories, requires it, and 1.25 fails with `requires go >= 1.26.0`). `go.mod` also pins
-`toolchain go1.26.8`, the patch release that carries the standard-library fixes `govulncheck`
-reports against 1.26.0, so an older `go` on your machine (or in CI) fetches it and builds with it.
+Or build it yourself with Go 1.26 or newer:
 
 ```sh
+git clone https://github.com/cloudparity/scanner && cd scanner
 make build            # bin/scanner
-go build ./agent/cmd/scanner
 ```
-
-As a container, from the root `Dockerfile` (a `scratch` image: one static binary and a
-certificate bundle, running as uid 65534):
-
-```sh
-docker build --platform linux/amd64 --build-arg TARGETARCH=amd64 -t scanner .
-```
-
-`deploy/azure/Dockerfile` is the Alpine variant the Container Apps job uses, because that job
-needs a shell to redirect stdout onto a mounted file share.
-
-## Run
-
-Sign in as the principal that holds Reader on the subscription, then scan:
-
-```sh
-az login
-scanner scan --subscription <subscription id> > estate.json
-```
-
-Credentials come from `DefaultAzureCredential`: the `az` login, environment variables, a
-managed identity, or a workload identity, in that order of what is present. The scanner never
-takes a credential as a flag.
-
-To send the estate to the console instead of stdout:
-
-```sh
-export PARITY_API_URL=https://api.cloudparity.net
-export PARITY_API_KEY=<a key minted in the console>
-scanner scan --subscription <subscription id>
-```
-
-Use the environment for the key, not `--api-key`: a flag is visible in the process list.
-
-Flags for `scan`: `--exclude-groups` (resource groups to leave out, normally the scanner's own),
-`--include-platform-managed` (keep `MC_`/`ME_` groups and NetworkWatcher; off by default because
-none of them can be restored).
-
-From inside a cluster: `scanner scan-cluster --cluster-id <ARM id of the AKS cluster>`, as a Job
-running under the service account from `deploy/kubernetes/reader.yaml`.
-
-## Deploy into your subscription
-
-`deploy/azure/scanner.bicep` creates one resource group with a Container Apps job, a
-user-assigned identity, and a storage account with a file share, and makes one grant outside
-that group: Reader on the subscription, to that identity. The job runs once per trigger and
-exits. [deploy/azure/README.md](deploy/azure/README.md) is the walkthrough for both paths, file
-share and console, including how the API key reaches the job as a Key Vault reference and never
-as a template parameter.
-
-## The `backup` and `prune` subcommands
-
-The same binary carries a PostgreSQL backup pipeline. It is off unless you run it, and it needs
-its own configuration; nothing in `scan` touches it. Read this before you do:
-
-- `scanner backup` connects to a PostgreSQL Flexible Server as a role with `REPLICATION`,
-  creates **one logical replication slot** on that server (the only object the scanner ever
-  creates on a database), streams changes, and writes chunks to a blob container you name. It
-  also calls Azure Backup's Data Protection API to trigger an on-demand backup and a restore-as-
-  files of the backup instance you name (`agent/internal/backup/postgres/controlplane.go`). Those
-  are writes to your subscription, and they need permissions Reader does not grant; the header
-  comments in `agent/cmd/scanner/backup.go` list every flag and what it reaches. The slot is
-  dropped on every exit path the process controls; a drop that fails exits non-zero and says so.
-- `scanner prune` reads the container and prints what a retention policy would delete. It
-  deletes nothing unless you pass `--apply`.
-
-If you only want the estate, do not configure these and they cannot run.
 
 ## Verify a release
 
-Every release on the Releases page carries the binaries and a `SHA256SUMS` file. Check the
-binary against it before you run it:
+Every binary, the `SHA256SUMS` file and the image carry a signed build-provenance attestation
+that proves it was built by this repository's workflow at the commit the release names. You
+check it with the [GitHub CLI](https://cli.github.com) and no key of ours:
 
 ```sh
-sha256sum -c SHA256SUMS --ignore-missing      # macOS: shasum -a 256 -c SHA256SUMS --ignore-missing
+gh attestation verify scanner_v0.1.0_linux_amd64 --owner cloudparity                # a binary: substitute the file you downloaded
+gh attestation verify oci://ghcr.io/cloudparity/scanner:v0.1.0 --owner cloudparity  # the image: substitute the tag
 ```
 
-That proves the download is intact. To prove it was *built by this repository's workflow at
-the commit the release names*, and not by whoever holds the Releases page, every binary, the
-`SHA256SUMS` file and the container image each carry their own signed build-provenance attestation
-([GitHub artifact attestations](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds):
-a SLSA provenance statement, signed with a short-lived Sigstore certificate the workflow obtains
-through OIDC, so there is no signing key to steal). You need the [GitHub CLI](https://cli.github.com)
-2.49 or later, signed in (`gh auth login`); no other tool, and no key of ours.
+A good result says `✓ Verification succeeded!` and names `cloudparity/scanner` as the `Build repo`.
+Anything else means the file or image is not the one this repository's workflow produced at that
+tag: do not run it. How the attestations are made, how to check a mirrored copy, and how to
+rebuild a byte-identical binary yourself: [docs/releases.md](docs/releases.md).
 
-A binary (substitute the file you downloaded):
+## How it works
 
-```sh
-gh attestation verify scanner_v0.1.0_linux_amd64 --owner cloudparity
-```
+The scanner discovers every resource in the subscription through Resource Graph and ARM, with
+Reader and nothing more. It translates each one into a common shape and ships the cloud's own
+document alongside, with the listed secret values replaced and each replacement recorded. It
+links resources by the ids their documents name, so the console can rebuild them in the order
+they depend on each other. And it emits one JSON document, with a gap for every place it could
+not look, so the estate never claims more than it holds.
 
-The image for a tag (substitute the tag):
+Read more:
 
-```sh
-gh attestation verify oci://ghcr.io/cloudparity/scanner:v0.1.0 --owner cloudparity
-```
-
-A good result says `✓ Verification succeeded!` and, below it, one matching attestation whose
-`Build repo` is `cloudparity/scanner` and whose `Build workflow` is
-`.github/workflows/release.yml@refs/tags/<tag>` for a binary or
-`.github/workflows/image.yml@refs/tags/<tag>` for the image. Anything else, including
-`✗ Verification failed` or `Error: no attestations found`, means the file or image is not the
-one this repository's workflow produced at that tag: do not run it. (Without a terminal, in a
-script, a good result prints nothing and exits 0.) `--owner cloudparity` accepts an attestation
-from any repository in the organisation; `--repo cloudparity/scanner` narrows it to this one.
-Each release also attaches every file's attestation beside it as a Sigstore bundle,
-`<file>.sigstore.json` (`scanner_v0.1.0_linux_amd64.sigstore.json`, `SHA256SUMS.sigstore.json`,
-and so on); `gh attestation verify <file> --bundle <file>.sigstore.json --owner cloudparity`
-checks against that copy instead of the one GitHub's API serves, so a mirror of the Releases
-page stays verifiable. `scanner_<tag>.intoto.jsonl` is the same six bundles in one file, one per
-line, and `--bundle scanner_<tag>.intoto.jsonl` works for any of the files: `gh` tries each line
-and accepts the one whose subject is the file. The image's attestation is pushed to ghcr.io
-beside the image as well, so it follows a mirror.
-
-The release notes name the commit and the Go version each binary was built from, and the digest
-of the container image built from the same commit. A binary you build yourself from a clean
-checkout of that commit, with that Go version and the same command
-(`CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" ./agent/cmd/scanner`), is byte-identical to
-the released one; the checkout matters because Go stamps the commit into the binary
-(`go version -m scanner` shows it). The image's binary is built from the same source with the
-same flags but from a context without `.git`, so it carries no stamp and hashes differently.
-The workflows that produce them are `.github/workflows/release.yml` and
-`.github/workflows/image.yml`; both run `go test ./...` on the tagged commit before they build,
-and a release is not published until the image for the tag is anonymously pullable and both
-the binaries and the image have passed the two `gh attestation verify` commands above (each
-file against the API, against its own `.sigstore.json` and against the `.intoto.jsonl`), run by
-the workflow itself.
-
-## Check the tree yourself
-
-- `go list -deps ./agent/cmd/scanner | grep "$(go list -m)/"` lists every package in this
-  repository the binary links.
-- `grep -rn 'http.Method\(Post\|Put\|Delete\|Patch\)' --include='*.go' --exclude='*_test.go' .`
-  finds every non-GET call: the estate upload, and the `backup`/`prune` pipeline described above.
-- `make all` runs `gofmt`, `go vet`, the linter, the tests and the build. CI
-  (`.github/workflows/verify.yml`) runs `gofmt`, `go vet`, `go test ./...` (with a pinned Bicep
-  compiler on `PATH`, so the install template is compiled and checked) and `go build ./...` on
-  every pull request and every push to `main`, with no Docker daemon and no cloud credential.
-  `main` accepts only pull requests that passed it, administrators included:
-  `gh api repos/cloudparity/scanner/branches/main/protection`.
-- The badges at the top of this page are the live status of a workflow on `main`, each linked
-  to its run history, and nothing else: `lint` (`.github/workflows/lint.yml`, golangci-lint with
-  `.golangci.yml`, a finding fails it), `govulncheck` (`.github/workflows/govulncheck.yml`, an
-  advisory whose vulnerable symbol this code reaches fails it) and `CodeQL`
-  (`.github/workflows/codeql.yml`, which fails while any CodeQL alert for the analysed ref is
-  open, not merely when the upload fails). The OpenSSF Scorecard badge is that project's own
-  weekly read of this repository (`.github/workflows/scorecard.yml` publishes it); the Go
-  version and license badges are read from `go.mod` and `LICENSE`.
+- [docs/estate.md](docs/estate.md): the estate schema, where it goes, and what the binary talks to
+- [docs/gaps.md](docs/gaps.md): every gap reason, what it means, and who fixes it
+- [docs/redaction.md](docs/redaction.md): what is redacted, what is flagged, and why not a regex
+- [docs/permissions.md](docs/permissions.md): every grant, what it unlocks, what we will not ask for
+- [docs/cli.md](docs/cli.md): every subcommand and flag, building from source, and what `backup` and `prune` write
+- [deploy/azure/README.md](deploy/azure/README.md), [deploy/kubernetes/reader.yaml](deploy/kubernetes/reader.yaml): the templates
+- [docs/releases.md](docs/releases.md): attestations, reproducible builds, and how to check the tree yourself
 
 ## Report a problem
 
 Vulnerabilities: [SECURITY.md](SECURITY.md). Everything else: open an issue.
+
+## Contributing
+
+Pull requests against `main`; what has to pass before one merges is in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
