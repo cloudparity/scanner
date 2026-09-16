@@ -11,8 +11,20 @@
 # outright with "fatal error: found bad pointer in Go heap", because QEMU mis-emulates what the
 # Go runtime does. Cross-compiling is also several times faster.
 # The same Go minor as go.mod and the root Dockerfile, so every artifact of one commit is built
-# by the same toolchain line; the release notes name the exact patch version.
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS build
+# by the same toolchain line; the release notes name the exact patch version. Not optional: the
+# official golang image sets GOTOOLCHAIN=local, so a builder one minor behind go.mod does not
+# download the newer toolchain, it fails `go mod download` with "go.mod requires go >= 1.26.0".
+#
+# PINNED BY DIGEST, tag kept for humans. The digest is the MULTI-ARCH INDEX, not the amd64
+# manifest: the build stage runs on $BUILDPLATFORM, which is arm64 on a laptop and amd64 in CI,
+# and only an index resolves to both. Pinning the amd64 manifest would break every local build on
+# an arm64 Mac. Dependabot (docker ecosystem, .github/dependabot.yml) bumps the digest when the
+# tag moves; to refresh by hand:
+#   go run github.com/google/go-containerregistry/cmd/crane@latest digest golang:1.26-alpine
+# or, with nothing but docker: docker pull golang:1.26-alpine && docker image inspect --format
+# '{{index .RepoDigests 0}}' golang:1.26-alpine. Not `docker manifest inspect | sha256sum`: that
+# re-indents the JSON and hashes something the registry never served.
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine@sha256:ce864e7223ac17b1775e6fd0b4c0db580c2eb50e7953a427916379e4b92a1628 AS build
 ARG TARGETOS
 ARG TARGETARCH
 WORKDIR /src
@@ -29,7 +41,14 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -trimpath -ldflags="-s -w" -o /out/scanner ./agent/cmd/scanner
 
-FROM alpine:3.21
+# PINNED BY DIGEST, tag kept for humans. Index digest again, not the amd64 manifest, so the same
+# line serves `docker build --platform linux/amd64` in CI and a native build on any other machine;
+# the index is resolved to the target platform at build time. Refresh by hand with:
+#   go run github.com/google/go-containerregistry/cmd/crane@latest digest alpine:3.21
+# or, with nothing but docker: docker pull alpine:3.21 && docker image inspect --format
+# '{{index .RepoDigests 0}}' alpine:3.21. Not `docker manifest inspect | sha256sum`: that
+# re-indents the JSON and hashes something the registry never served.
+FROM alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
 # Non-root: the scanner only ever reads a cloud and writes one file.
 RUN adduser -D -u 10001 scanner
 COPY --from=build /out/scanner /usr/local/bin/scanner

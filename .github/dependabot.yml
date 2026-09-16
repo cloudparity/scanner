@@ -1,4 +1,5 @@
-# Weekly dependency updates for the Go module and for every action the workflows pin.
+# Weekly dependency updates for the Go module, for every action the workflows pin, and for the
+# base images the two Dockerfiles pin by digest.
 # Minor and patch bumps arrive as one pull request per ecosystem; a major bump keeps its own,
 # because it is the one that can change behaviour and deserves its own review.
 version: 2
@@ -17,3 +18,16 @@ updates:
     groups:
       actions-minor-and-patch:
         update-types: [minor, patch]
+  # The FROM lines are pinned to image:tag@sha256:<digest>, so a base image never changes under a
+  # build unnoticed. The cost of a pin is that it goes stale; these two entries are what keep it
+  # current: Dependabot moves the digest when the tag is rebuilt upstream (an alpine or Go patch)
+  # and bumps the tag when a new one appears. One entry per Dockerfile directory, because
+  # Dependabot scans a directory, not a tree.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: /deploy/azure
+    schedule:
+      interval: weekly
