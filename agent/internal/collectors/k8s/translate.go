@@ -69,7 +69,7 @@ func translate(clusterID string, spec kindSpec, items []map[string]any) ([]contr
 		resource := contract.Resource{
 			Provider:   contract.ProviderK8s,
 			ID:         objectID(spec, namespace, name),
-			ParentID:   parentID(clusterID, spec, meta, namespace),
+			ParentID:   parentID(clusterID, meta, namespace),
 			Type:       resourceType(spec),
 			Name:       name,
 			Account:    clusterID,
@@ -111,7 +111,7 @@ func resourceType(spec kindSpec) string {
 // ownerReferences first, because that is the real hierarchy - a ReplicaSet belongs to its Deployment,
 // not merely to its namespace - and contract.Resource says the collector resolves ParentID so no
 // engine code has to parse an id to find ancestry.
-func parentID(clusterID string, spec kindSpec, meta map[string]any, namespace string) string {
+func parentID(clusterID string, meta map[string]any, namespace string) string {
 	// The CONTROLLER owner, not the first entry. Kubernetes convention is that the single reference
 	// with controller:true is the real parent; list order is arbitrary and any apply can reorder it.
 	// Taking the first meant ParentID could point at a non-controller owner AND could change between

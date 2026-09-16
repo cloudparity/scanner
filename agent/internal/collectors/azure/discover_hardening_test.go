@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -165,7 +166,8 @@ func TestQueryResourcesBoundsTheWalkByReportedRecords(t *testing.T) {
 	calls := 0
 	endless := func(_ context.Context, _ armresourcegraph.QueryRequest, _ *armresourcegraph.ClientResourcesOptions) (armresourcegraph.ClientResourcesResponse, error) {
 		calls++
-		token := "page-" + string(rune('a'+calls%26)) + string(rune('a'+calls/26))
+		// A token that differs on every call, so that no dedupe short-circuits the walk.
+		token := fmt.Sprintf("page-%c%c", 'a'+calls%26, 'a'+calls/26)
 		return armresourcegraph.ClientResourcesResponse{QueryResponse: armresourcegraph.QueryResponse{
 			Data:         rows("r"),
 			SkipToken:    &token,
@@ -195,7 +197,7 @@ func TestExceededPageBudget(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got, _ := exceededPageBudget(tt.state, 0); got != tt.want {
+			if got, _ := exceededPageBudget(tt.state); got != tt.want {
 				t.Errorf("exceededPageBudget = %v, want %v", got, tt.want)
 			}
 		})
@@ -211,7 +213,7 @@ func TestParseResetWindow(t *testing.T) {
 		"00:01:30":    90 * time.Second,
 		"01:00:00":    time.Hour,
 		"7":           7 * time.Second,
-		"  00:00:03 ": 3 * time.Second,
+		"  00:00:03 ": 3 * time.Second, //nolint:gocritic // mapKey: the padding is the fixture; the parser must trim it
 		"":            0,
 		"garbage":     0,
 	}

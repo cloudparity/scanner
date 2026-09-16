@@ -438,7 +438,7 @@ func queryTable(ctx context.Context, client graphClient, subscription string, ta
 
 		// A hard ceiling independent of the token: whatever the service does, the walk
 		// cannot exceed the record count it told us about.
-		if over, limit := exceededPageBudget(state, len(rows)); over {
+		if over, limit := exceededPageBudget(state); over {
 			return nil, nil, fmt.Errorf("resource graph query (%s, subscription %s): read %d rows over %d pages, past the %d-page budget for a reported %d records; refusing to continue", table.name, subscription, len(rows), state.pages, limit, *state.baselineTotal)
 		}
 
@@ -451,7 +451,7 @@ func queryTable(ctx context.Context, client graphClient, subscription string, ta
 
 // exceededPageBudget bounds the walk by the service's own record count, with slack for
 // rows created mid-walk.
-func exceededPageBudget(state completeness, read int) (bool, int) {
+func exceededPageBudget(state completeness) (bool, int) {
 	if state.baselineTotal == nil {
 		return false, 0
 	}

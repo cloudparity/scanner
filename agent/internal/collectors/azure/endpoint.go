@@ -60,7 +60,7 @@ func hostsIn(value string) []string {
 	}
 	lowered := strings.ToLower(value)
 	tokens := strings.FieldsFunc(lowered, func(r rune) bool {
-		return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '.' || r == '-')
+		return (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '.' && r != '-'
 	})
 	var hosts []string
 	seen := map[string]struct{}{}

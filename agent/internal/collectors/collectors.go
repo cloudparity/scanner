@@ -14,6 +14,7 @@ import (
 // Plane identifies which cloud a collector reads.
 type Plane string
 
+// The planes a collector can read. Every collector names exactly one.
 const (
 	PlaneAzure Plane = "azure"
 	PlaneAWS   Plane = "aws"

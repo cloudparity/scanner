@@ -65,7 +65,7 @@ func collectVaultReferences(ctx context.Context, fetcher armFetcher, resources [
 		path := site.ID + "/config/configreferences/appsettings"
 		body, err := fetcher.Get(ctx, path, vaultReferencesAPIVersion)
 		if err != nil {
-			if gap := vaultReferenceGap(site, path, err); gap != nil {
+			if gap := vaultReferenceGap(path, err); gap != nil {
 				gaps = append(gaps, *gap)
 			}
 			continue
@@ -137,7 +137,7 @@ func vaultReferenceResource(site contract.Resource, id, name string, properties 
 }
 
 // vaultReferenceGap explains a failed read, or stays silent when there is nothing to explain.
-func vaultReferenceGap(site contract.Resource, path string, err error) *contract.Gap {
+func vaultReferenceGap(path string, err error) *contract.Gap {
 	var responseErr *azcore.ResponseError
 	if errors.As(err, &responseErr) {
 		switch responseErr.StatusCode {

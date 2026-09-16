@@ -29,11 +29,14 @@ func estate() *contract.Estate {
 }
 
 // server returns a client pointed at a stub, bypassing the https rule that New enforces.
+//
+// Handlers here discard fmt.Fprint's result: a reply the client did not get fails the assertion
+// on the client side, which is where every test looks.
 func server(t *testing.T, h http.HandlerFunc) (*Client, *httptest.Server) {
 	t.Helper()
 	s := httptest.NewServer(h)
 	t.Cleanup(s.Close)
-	return &Client{BaseURL: s.URL, APIKey: "parity_testkey", HTTP: s.Client()}, s
+	return &Client{BaseURL: s.URL, APIKey: "parity_testkey", HTTP: s.Client()}, s //gosec:disable G101 -- a stub server accepts any key; this one is a fixture
 }
 
 func TestASuccessfulUpload(t *testing.T) {
@@ -43,7 +46,7 @@ func TestASuccessfulUpload(t *testing.T) {
 		gotKey, gotPath, gotType = r.Header.Get(KeyHeader), r.URL.Path, r.Header.Get("content-type")
 		gotBody, _ = io.ReadAll(r.Body)
 		w.WriteHeader(http.StatusCreated)
-		fmt.Fprint(w, `{"scanId":"1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d","resourceCount":1}`)
+		_, _ = fmt.Fprint(w, `{"scanId":"1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d","resourceCount":1}`)
 	})
 
 	got, err := c.Send(context.Background(), estate())
@@ -81,7 +84,7 @@ func TestTheKeyIsNeverInTheUrlOrTheBody(t *testing.T) {
 		url = r.URL.String()
 		body, _ = io.ReadAll(r.Body)
 		w.WriteHeader(http.StatusCreated)
-		fmt.Fprint(w, `{"scanId":"x","resourceCount":1}`)
+		_, _ = fmt.Fprint(w, `{"scanId":"x","resourceCount":1}`)
 	})
 	if _, err := c.Send(context.Background(), estate()); err != nil {
 		t.Fatal(err)
@@ -112,7 +115,7 @@ func TestFailuresExplainThemselves(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			c, _ := server(t, func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(tc.status)
-				fmt.Fprint(w, tc.body)
+				_, _ = fmt.Fprint(w, tc.body)
 			})
 			_, err := c.Send(context.Background(), estate())
 			if err == nil {
@@ -133,7 +136,7 @@ func TestFailuresExplainThemselves(t *testing.T) {
 func TestValidationProblemsAreSurfaced(t *testing.T) {
 	c, _ := server(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(400)
-		fmt.Fprint(w, `{"error":"the scan did not pass validation","problems":[
+		_, _ = fmt.Fprint(w, `{"error":"the scan did not pass validation","problems":[
 			{"path":"resources[3].type","message":"required"},
 			{"path":"scan.provider","message":"unknown provider \"nope\""}]}`)
 	})
@@ -156,7 +159,7 @@ func TestTooManyProblemsAreTruncated(t *testing.T) {
 	}
 	c, _ := server(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(400)
-		fmt.Fprintf(w, `{"error":"bad","problems":[%s]}`, strings.Join(problems, ","))
+		_, _ = fmt.Fprintf(w, `{"error":"bad","problems":[%s]}`, strings.Join(problems, ","))
 	})
 	_, err := c.Send(context.Background(), estate())
 	if err == nil {
@@ -171,7 +174,7 @@ func TestTooManyProblemsAreTruncated(t *testing.T) {
 func TestAHugeErrorBodyIsBounded(t *testing.T) {
 	c, _ := server(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(500)
-		fmt.Fprint(w, strings.Repeat("x", 5<<20))
+		_, _ = fmt.Fprint(w, strings.Repeat("x", 5<<20))
 	})
 	_, err := c.Send(context.Background(), estate())
 	if err == nil {
@@ -320,7 +323,7 @@ func TestEveryFailureIsReportedToTheCaller(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			c, _ := server(t, func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(tc.status)
-				fmt.Fprint(w, tc.body)
+				_, _ = fmt.Fprint(w, tc.body)
 			})
 			err := c.SendCycle(context.Background(), report())
 			if err == nil {
@@ -378,7 +381,7 @@ func TestAFailedSendCostsNothingButTheRow(t *testing.T) {
 		attempts++
 		if attempts == 1 {
 			w.WriteHeader(http.StatusNotFound)
-			fmt.Fprint(w, `{"error":"not found"}`)
+			_, _ = fmt.Fprint(w, `{"error":"not found"}`)
 			return
 		}
 		body, _ := io.ReadAll(r.Body)
@@ -406,11 +409,28 @@ func TestAFailedSendCostsNothingButTheRow(t *testing.T) {
 func TestCancellationIsHonoured(t *testing.T) {
 	c, _ := server(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusCreated)
-		fmt.Fprint(w, `{"scanId":"x"}`)
+		_, _ = fmt.Fprint(w, `{"scanId":"x"}`)
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, err := c.Send(ctx, estate()); err == nil {
 		t.Fatal("a cancelled upload succeeded")
+	}
+}
+
+// snippet is the bound on what an unexpected body contributes to a log line.
+func TestSnippetBoundsTheBodyAtTwoHundredBytes(t *testing.T) {
+	for name, tc := range map[string]struct{ in, want string }{
+		"empty":       {"", "(no body)"},
+		"whitespace":  {" \n\t", "(no body)"},
+		"short":       {"  not json  ", "not json"},
+		"exactly 200": {strings.Repeat("a", 200), strings.Repeat("a", 200)},
+		"over 200":    {strings.Repeat("b", 201), strings.Repeat("b", 200) + "…"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := snippet([]byte(tc.in)); got != tc.want {
+				t.Errorf("snippet(%d bytes) = %q, want %q", len(tc.in), got, tc.want)
+			}
+		})
 	}
 }
