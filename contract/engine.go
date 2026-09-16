@@ -15,6 +15,7 @@ package contract
 // (scanner-engine.md §11).
 type RecoveryVerb string
 
+// The verbs the resource-type table can name.
 const (
 	VerbCreateStandby     RecoveryVerb = "create-standby"
 	VerbAddRegion         RecoveryVerb = "add-region"

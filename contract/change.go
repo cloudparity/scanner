@@ -21,6 +21,7 @@ const FormatChangeJSONL = "parity/change-jsonl"
 // ChangeOp is what happened to one row.
 type ChangeOp string
 
+// The three operations a decoded row can carry.
 const (
 	ChangeInsert ChangeOp = "insert"
 	ChangeUpdate ChangeOp = "update"
