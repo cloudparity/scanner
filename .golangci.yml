@@ -1,15 +1,81 @@
+# golangci-lint v2 configuration. `make lint` runs this set, and a finding is a failure, not
+# advice. A genuine false positive is suppressed INLINE, at the line, with
+# `//nolint:<linter> // <reason a stranger would accept>` - never here, because a global
+# exclusion also silences the next real instance. nolintlint enforces that every such
+# directive names its linter and carries a reason.
+#
+# gosec is the one exception in spelling: its findings are suppressed with gosec's own
+# `//gosec:disable Gxxx -- <reason>`, because that is the only inline form BOTH this runner and
+# a bare `gosec ./...` honour (gosec does not read //nolint). Same rule: at the line, one rule
+# id, a reason.
+version: "2"
+
 run:
-  timeout: 3m
+  timeout: 5m
+  # Build-tagged files (the Postgres container tests, the Azure testbed) are invisible without
+  # this and would rot in silence. Linting is a compile; it needs no Docker daemon.
+  build-tags:
+    - docker
+    - testbed
+
 linters:
+  default: none
   enable:
-    - govet
-    - staticcheck
     - errcheck
+    - gocritic
+    - gosec
+    - govet
     - ineffassign
-    - unused
     - misspell
+    - nolintlint
+    - revive
+    - staticcheck
+    - unconvert
+    - unused
+  settings:
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-unused: false
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+          arguments:
+            # Go's own convention for test helpers: *testing.T first, then the context.
+            - allow-types-before: "*testing.T"
+        - name: context-keys-type
+        - name: dot-imports
+        - name: empty-block
+        - name: error-naming
+        - name: error-return
+        - name: error-strings
+        - name: errorf
+        - name: exported
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: package-comments
+        - name: range
+        - name: receiver-naming
+        - name: redefines-builtin-id
+        - name: superfluous-else
+        - name: time-naming
+        - name: unexported-return
+        - name: unreachable-code
+        - name: unused-parameter
+        - name: var-declaration
+        - name: var-naming
+    staticcheck:
+      checks:
+        - all
+  exclusions:
+    generated: lax
+
+formatters:
+  enable:
     - gofmt
     - goimports
+
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0

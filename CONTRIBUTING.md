@@ -11,7 +11,9 @@ administrators as well. You can read the setting yourself:
 Before you push, `make hooks` once installs `pre-commit` and `pre-push` hooks that run the same
 checks plus the race detector and a coverage floor of 85% on every collector, so you find out
 locally. Those two are stricter than CI and run only in the hook. `make all` runs `fmt`, `vet`,
-`lint`, `test` and `build`.
+`lint`, `test` and `build`; `lint` needs [golangci-lint](https://golangci-lint.run/) v2 on your
+PATH and fails if it is missing, because a linter that is skipped when absent is a linter nobody
+runs.
 
 Merging to `main` publishes `ghcr.io/cloudparity/scanner:latest` (`.github/workflows/image.yml`);
 pushing a `v*` tag publishes the same image under that tag and a GitHub Release with the binaries
