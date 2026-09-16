@@ -57,7 +57,22 @@ role is granted), and `PARITY_API_URL` if you set it. During `scan-cluster`: the
 API server, `login.microsoftonline.com` when the token for it comes from Entra rather than the
 pod's projected service-account token, and `PARITY_API_URL` if set. Nothing else.
 
-## Build
+## Get it
+
+Every release on the [Releases page](https://github.com/cloudparity/scanner/releases) carries a
+static binary for linux/amd64, linux/arm64, darwin/arm64, darwin/amd64 and windows/amd64, plus a
+`SHA256SUMS` file. Download the one for your platform and check it (see *Verify a release*).
+
+The same commit is published as a container image, the one `deploy/azure/scanner.bicep` runs:
+
+```sh
+docker pull ghcr.io/cloudparity/scanner:<tag>       # e.g. ghcr.io/cloudparity/scanner:v0.1.0
+```
+
+`:latest` follows `main`, and every push to `main` is also tagged with its commit sha. Pin a
+release tag, or the digest the release notes name, for anything you run more than once.
+
+## Build from source
 
 Go 1.25 or newer (`go.mod` says `go 1.25.0`; the Azure SDK requires it, and 1.24 fails with
 `requires go >= 1.25.0`).
@@ -140,11 +155,13 @@ Every release on the Releases page carries the binaries and a `SHA256SUMS` file.
 binary against it before you run it:
 
 ```sh
-sha256sum -c SHA256SUMS --ignore-missing
+sha256sum -c SHA256SUMS --ignore-missing      # macOS: shasum -a 256 -c SHA256SUMS --ignore-missing
 ```
 
-The Releases page also names the commit each binary was built from, so you can build the same
-commit yourself and compare.
+The release notes name the commit and the Go version each binary was built from, and the digest
+of the container image built from the same commit, so you can build the same commit yourself
+(`CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" ./agent/cmd/scanner`) and compare. The
+workflows that produce them are `.github/workflows/release.yml` and `.github/workflows/image.yml`.
 
 ## Check the tree yourself
 
@@ -153,8 +170,8 @@ commit yourself and compare.
 - `grep -rn 'http.Method\(Post\|Put\|Delete\|Patch\)' --include='*.go' --exclude='*_test.go' .`
   finds every non-GET call: the estate upload, and the `backup`/`prune` pipeline described above.
 - `make all` runs `gofmt`, `go vet`, the linter, the tests and the build. CI
-  (`.github/workflows/verify.yml`) runs the same plus the race detector and a coverage floor on
-  every collector.
+  (`.github/workflows/verify.yml`) runs `gofmt`, `go vet`, `go test ./...` and `go build ./...`
+  on every pull request and every push to `main`, with no Docker daemon and no cloud credential.
 
 ## Report a problem
 

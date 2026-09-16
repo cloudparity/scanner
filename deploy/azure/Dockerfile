@@ -15,7 +15,13 @@ ARG TARGETOS
 ARG TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum ./
-RUN go mod download
+# An OPTIONAL pre-downloaded module cache, served to `go mod download` as a file:// module proxy.
+# CI stages its module cache as .gomodcache/ (already in proxy layout) so a cache hit downloads
+# nothing; a plain `docker build .` has no .gomodcache/, the single-character glob matches
+# nothing, BuildKit copies nothing, the file:// proxy answers 404 and Go falls through to
+# proxy.golang.org. Whichever proxy answers, go.sum checks every module.
+COPY .gomodcach[e] /modproxy/
+RUN GOPROXY=file:///modproxy,https://proxy.golang.org,direct go mod download
 COPY . .
 # Static, so the runtime image needs no libc and the binary is the only moving part.
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
