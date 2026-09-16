@@ -21,7 +21,7 @@ cannot publish a failing build.
 
 ## Rules the tests enforce
 
-- **Go 1.25 or newer.** `go.mod` is the source of truth; CI reads it.
+- **Go 1.26 or newer.** `go.mod` is the source of truth; CI reads it.
 - **Write the failing test first.** Table-driven tests; golden files for the JSON contract in
   `contract/testdata/`.
 - **No network in unit tests.** Resource Graph, ARM, Key Vault and the Kubernetes API sit

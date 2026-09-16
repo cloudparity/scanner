@@ -74,8 +74,8 @@ release tag, or the digest the release notes name, for anything you run more tha
 
 ## Build from source
 
-Go 1.25 or newer (`go.mod` says `go 1.25.0`; the Azure SDK requires it, and 1.24 fails with
-`requires go >= 1.25.0`).
+Go 1.26 or newer (`go.mod` says `go 1.26.0`; `golang.org/x/crypto` v0.56.0, which fixes the last of
+the open advisories, requires it, and 1.25 fails with `requires go >= 1.26.0`).
 
 ```sh
 make build            # bin/scanner

@@ -10,7 +10,7 @@
 #
 # --platform on the build stage keeps the toolchain native to the builder while GOARCH decides the
 # output, so cross-building from an x86 machine is not emulated.
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
 ARG TARGETARCH=arm64
 WORKDIR /src
 
