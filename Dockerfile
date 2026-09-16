@@ -10,7 +10,19 @@
 #
 # --platform on the build stage keeps the toolchain native to the builder while GOARCH decides the
 # output, so cross-building from an x86 machine is not emulated.
-FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
+#
+# PINNED BY DIGEST, tag kept for humans. A tag is a moving pointer: golang:1.26-alpine points at a
+# new image every time upstream rebuilds it, so two builds of the same commit can use two different
+# toolchains. The digest is the MULTI-ARCH INDEX, not a per-platform manifest, on purpose: the
+# builder resolves the index to its own platform, which is what keeps --platform=$BUILDPLATFORM
+# working from an arm64 laptop and an amd64 CI runner alike. Pinning a per-platform digest would
+# make the build fail on the other one. Dependabot (docker ecosystem, .github/dependabot.yml) bumps
+# the digest when the tag moves; to refresh by hand:
+#   go run github.com/google/go-containerregistry/cmd/crane@latest digest golang:1.26-alpine
+# or, with nothing but docker: docker pull golang:1.26-alpine && docker image inspect --format
+# '{{index .RepoDigests 0}}' golang:1.26-alpine. Not `docker manifest inspect | sha256sum`: that
+# re-indents the JSON and hashes something the registry never served.
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine@sha256:ce864e7223ac17b1775e6fd0b4c0db580c2eb50e7953a427916379e4b92a1628 AS build
 ARG TARGETARCH=arm64
 WORKDIR /src
 
