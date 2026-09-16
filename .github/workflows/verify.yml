@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           # Read from go.mod so CI can never drift from the module's requirement.
           go-version-file: go.mod
@@ -97,7 +97,7 @@ jobs:
       # reaches the container only as a Key Vault secret reference, never a flag or a parameter.
       # This is the one job with a Bicep compiler on PATH, so this is where the test runs for
       # real; under `go test ./...` in the verify job above it skips.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: false
