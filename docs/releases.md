@@ -87,3 +87,4 @@ the workflow itself.
   (`.github/workflows/codeql.yml`, which fails while any CodeQL alert for the analysed ref is
   open, not merely when the upload fails). The OpenSSF Scorecard badge is that project's own
   weekly read of this repository (`.github/workflows/scorecard.yml` publishes it); the Go
+  version and license badges are read from `go.mod` and `LICENSE`.

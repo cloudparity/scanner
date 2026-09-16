@@ -7,7 +7,8 @@ the values on a redaction list. Both halves of that sentence matter:
   administrator passwords, and storage/account keys (`properties.*.primaryKey`, `secondaryKey`,
   `accessKey`) are replaced before the document is written, and each removal is listed in
   `resource.redactions` with its path and reason. The list is
-  `agent/internal/collectors/azure/translate.go:278-285`. Kubernetes Secret values (`data`,
+  `agent/internal/collectors/azure/translate.go:290-297` (`redactionRules`), applied by
+  `redactedDocument` at `translate.go:304`. Kubernetes Secret values (`data`,
   `stringData`) are stripped at the same boundary: `agent/internal/collectors/k8s/translate.go:274`.
 - **Flagged, not redacted.** Anything that looks like a credential but is not on the list ships
   as-is and the resource gets a gap of reason `unscreened` naming the field paths
