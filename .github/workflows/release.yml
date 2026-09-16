@@ -1,19 +1,30 @@
 name: release
-# On a v* tag: cross-compile the scanner for five platforms, write SHA256SUMS, attest the lot,
-# and publish a GitHub Release with the binaries attached. The release body says how to verify
-# a download, names the container image digest for the same tag (published by image.yml), and
-# links the permissions the scanner asks for.
+# On a v* tag: cross-compile the scanner for five platforms, write SHA256SUMS, attest each of
+# the six files on its own, and publish a GitHub Release with the binaries, the checksums and
+# one Sigstore bundle per file attached. The release body says how to verify a download, names
+# the container image digest for the same tag (published by image.yml), and links the
+# permissions the scanner asks for.
 #
-# A tag can point at any commit and never triggers verify, so this job runs `go test ./...` on
-# the tagged commit itself before it builds anything. It also refuses to publish until the
-# image for the same tag is anonymously pullable and carries a provenance attestation of its
-# own: a release must never name an image a customer cannot pull or cannot verify.
+# A tag can point at any commit and never triggers verify, so the build job runs `go test ./...`
+# on the tagged commit itself before it builds anything. The release job refuses to publish
+# until the image for the same tag is anonymously pullable and carries a provenance
+# attestation of its own: a release must never name an image a customer cannot pull or cannot
+# verify.
 #
-# Provenance is a GitHub artifact attestation: a SLSA build-provenance statement over every
-# file in dist/, signed with a Sigstore certificate that the workflow obtains through OIDC
-# (id-token: write) and stored in this repository's attestations API (attestations: write).
-# No signing key exists to leak or rotate. A customer verifies a download with
+# Provenance is a GitHub artifact attestation: a SLSA build-provenance statement, signed with a
+# Sigstore certificate that the workflow obtains through OIDC (id-token: write) and stored in
+# this repository's attestations API (attestations: write). No signing key exists to leak or
+# rotate. There is one statement per file, not one over the lot: actions/attest writes a single
+# statement for every subject it is given, so the attest job runs once per file (a matrix over
+# what build produced) and each run's bundle is attached beside its file as
+# <file>.sigstore.json. A customer verifies a download with
 # `gh attestation verify <file> --owner cloudparity`; README.md, "Verify a release".
+#
+# Three jobs so each grant exists only where it is used: build has nothing beyond contents:
+# read, the OIDC and attestation grants live in attest for the seconds a signature takes, and
+# only release can write to the repository (the release itself). The build's dist/ crosses
+# from job to job as a workflow artifact whose digest download-artifact checks, and the
+# release job re-runs `sha256sum -c` on it before it verifies or publishes anything.
 on:
   push:
     tags: ['v*']
@@ -25,12 +36,13 @@ env:
   IMAGE: ghcr.io/cloudparity/scanner
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write        # create the release and upload its assets; this job only
-      id-token: write        # mint the OIDC token that Sigstore exchanges for a signing certificate
-      attestations: write    # store the signed provenance in this repository's attestations API
+      contents: read
+    outputs:
+      files: ${{ steps.build.outputs.files }}
+      go: ${{ steps.build.outputs.go }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -45,7 +57,10 @@ jobs:
       # Static (CGO off), -trimpath so the binary does not record the runner's directory
       # layout, -s -w to drop the symbol table and DWARF. The same flags as the Dockerfile,
       # so a binary and the image built from one commit contain the same code.
+      # `files` is the list the attest job fans out over: whatever ended up in dist/, as JSON,
+      # so the matrix cannot drift from what was built.
       - name: build
+        id: build
         run: |
           mkdir -p dist
           for target in linux/amd64 linux/arm64 darwin/arm64 darwin/amd64 windows/amd64; do
@@ -57,26 +72,119 @@ jobs:
             echo "built $out"
           done
           (cd dist && sha256sum scanner_* > SHA256SUMS && cat SHA256SUMS)
+          echo "files=$(ls dist | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
+          echo "go=$(go version | awk '{print $3}')" >> "$GITHUB_OUTPUT"
 
-      # One SLSA provenance statement whose subjects are the five binaries and SHA256SUMS,
-      # signed by this workflow run at this commit. The bundle it writes is attached to the
-      # release below as scanner_<tag>.sigstore.json, so the attestation can also be verified
-      # from the attached copy (`gh attestation verify --bundle`) and survives with a mirror.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 1
+
+  # One run per file in dist/. Each produces a SLSA provenance statement whose only subject is
+  # that file, signed by this workflow run at this commit, and hands the Sigstore bundle on to
+  # the release job as <file>.sigstore.json. The file's name is the artifact's identity in
+  # GitHub's API and the bundle's name on the Releases page, which is why the matrix carries
+  # the name and not the platform.
+  attest:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write        # mint the OIDC token that Sigstore exchanges for a signing certificate
+      attestations: write    # store the signed provenance in this repository's attestations API
+    strategy:
+      matrix:
+        file: ${{ fromJSON(needs.build.outputs.files) }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist
+
       - name: attest
         id: attest
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: dist/*
+          subject-path: dist/${{ matrix.file }}
 
-      # The README's verification command, run on what was just built and narrowed to this
+      - name: name the bundle after its subject
+        env:
+          FILE: ${{ matrix.file }}
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          mkdir -p bundles
+          cp "$BUNDLE" "bundles/$FILE.sigstore.json"
+          ls -l bundles
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bundle-${{ matrix.file }}
+          path: bundles/
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    needs: [build, attest]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # create the release and upload its assets; this job only
+    env:
+      GH_REPO: ${{ github.repository }}   # no checkout here, so gh cannot read it off a remote
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: bundle-*
+          merge-multiple: true
+          path: dist
+
+      # What the Releases page will carry, assembled and checked before anything is verified
+      # or published. Every file the build job listed must be in dist/ and still hash as
+      # SHA256SUMS says; every one of them must have exactly its own <file>.sigstore.json, and
+      # nothing else may be there. Then the six bundles are joined, one per line, into
+      # scanner_<tag>.intoto.jsonl: the layout `gh attestation download` writes and
+      # `gh attestation verify --bundle` reads (it tries each line and succeeds on the one whose
+      # subject is the file). OpenSSF Scorecard's Signed-Releases check scores a release 8 for
+      # a *.sigstore.json or *.sig asset and 10 only for an asset ending .intoto.jsonl, so that
+      # file is also what the badge is keyed on. FILES is the build job's own list.
+      - name: assemble the release assets
+        env:
+          FILES: ${{ needs.build.outputs.files }}
+        run: |
+          cd dist
+          sha256sum -c SHA256SUMS
+          jsonl="scanner_${GITHUB_REF_NAME}.intoto.jsonl"
+          : > "$jsonl"
+          while IFS= read -r f; do
+            [ -f "$f" ] || { echo "::error::$f was built but is not in dist/"; exit 1; }
+            [ -f "$f.sigstore.json" ] || { echo "::error::$f has no bundle"; exit 1; }
+            jq -e '.dsseEnvelope | has("payload")' "$f.sigstore.json" > /dev/null \
+              || { echo "::error::$f.sigstore.json is not a Sigstore bundle"; exit 1; }
+            jq -c . "$f.sigstore.json" >> "$jsonl"
+          done < <(echo "$FILES" | jq -r '.[]')
+          expected=$(( $(echo "$FILES" | jq 'length') * 2 + 1 ))
+          actual=$(ls | wc -l | tr -d ' ')
+          [ "$actual" = "$expected" ] || { echo "::error::dist/ holds $actual files, expected $expected"; ls -l; exit 1; }
+          echo "release assets:"; ls -l
+
+      # The README's verification commands, run on what was just built and narrowed to this
       # repository (--owner accepts the whole organisation; the job token is certain to see its
-      # own repository's attestations). A release whose binaries do not verify is not published.
+      # own repository's attestations): once against the attestations API, once against the
+      # bundle attached beside the file, once against the joined .intoto.jsonl. A release whose
+      # files do not verify all three ways is not published.
       - name: verify the binaries
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+          FILES: ${{ needs.build.outputs.files }}
         run: |
-          for f in dist/*; do
+          cd dist
+          jsonl="scanner_${GITHUB_REF_NAME}.intoto.jsonl"
+          while IFS= read -r f; do
             ok=0
             for _ in 1 2 3; do
               gh attestation verify "$f" --repo "$GITHUB_REPOSITORY" && { ok=1; break; }
@@ -84,8 +192,11 @@ jobs:
               sleep 10
             done
             [ "$ok" = 1 ] || { echo "::error::$f does not verify against this repository's attestations"; exit 1; }
-          done
-          cp "$BUNDLE" "dist/scanner_${GITHUB_REF_NAME}.sigstore.json"
+            gh attestation verify "$f" --bundle "$f.sigstore.json" --repo "$GITHUB_REPOSITORY" \
+              || { echo "::error::$f does not verify against $f.sigstore.json"; exit 1; }
+            gh attestation verify "$f" --bundle "$jsonl" --repo "$GITHUB_REPOSITORY" \
+              || { echo "::error::$f does not verify against $jsonl"; exit 1; }
+          done < <(echo "$FILES" | jq -r '.[]')
 
       # The image workflow runs on the same tag push, in parallel. Wait for it to publish
       # :<tag>, asking ghcr.io anonymously - with no credential, exactly as the install template
@@ -140,10 +251,11 @@ jobs:
       - name: release notes
         env:
           DIGEST: ${{ steps.image.outputs.digest }}
+          GO: ${{ needs.build.outputs.go }}
         run: |
           tag="$GITHUB_REF_NAME"
           {
-            echo "Built from commit \`$GITHUB_SHA\` with $(go version | awk '{print $3}'):"
+            echo "Built from commit \`$GITHUB_SHA\` with $GO:"
             echo '`CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" ./agent/cmd/scanner`.'
             echo
             echo "## Verify a download"
@@ -154,15 +266,17 @@ jobs:
             echo "sha256sum -c SHA256SUMS --ignore-missing      # macOS: shasum -a 256 -c SHA256SUMS --ignore-missing"
             echo '```'
             echo
-            echo "Every attached file carries a signed build-provenance attestation. To prove a binary was built"
-            echo "by this repository's release workflow at commit \`$GITHUB_SHA\` (needs the GitHub CLI, 2.49 or later):"
+            echo "Every attached file carries its own signed build-provenance attestation. To prove a binary was"
+            echo "built by this repository's release workflow at commit \`$GITHUB_SHA\` (needs the GitHub CLI, 2.49 or later):"
             echo
             echo '```sh'
             echo "gh attestation verify scanner_${tag}_linux_amd64 --owner cloudparity"
             echo '```'
             echo
-            echo "\`scanner_${tag}.sigstore.json\` is the same attestation as a Sigstore bundle: add"
-            echo "\`--bundle scanner_${tag}.sigstore.json\` to verify against the attached copy instead of the API's."
+            echo "Beside each file is its attestation as a Sigstore bundle, \`<file>.sigstore.json\`: add"
+            echo "\`--bundle scanner_${tag}_linux_amd64.sigstore.json\` to verify against the attached copy instead"
+            echo "of the API's. \`scanner_${tag}.intoto.jsonl\` is all of the bundles in one file, one per line, and"
+            echo "works the same way for any of the files."
             echo
             echo "## Container image"
             echo
