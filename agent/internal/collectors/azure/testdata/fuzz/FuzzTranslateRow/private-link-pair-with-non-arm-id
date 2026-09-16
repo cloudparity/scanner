@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"id\":\"0\",\"\":{\"\":[{\"\":{\"\":{\"fqdns\":[\"0.0.AAA\"],\"privateLinkServiceId\":\"1\"}}}]}}")

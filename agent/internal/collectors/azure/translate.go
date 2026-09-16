@@ -42,8 +42,14 @@ func translate(subscription string, raw []armResource) ([]contract.Resource, []c
 // not-attempted Gap, so a dropped row is never silently absent.
 func translateRow(subscription string, row armResource) (contract.Resource, *contract.Gap, bool) {
 	original := str(row["id"])
-	if original == "" {
-		// Without an id nothing can reference it and nothing can be recovered by it.
+
+	// A trailing slash would stop the id string-equalling a reference to the same
+	// resource written without one, and id equality *is* the identity test.
+	id := strings.ToLower(strings.TrimRight(original, "/"))
+	if id == "" {
+		// Without an id nothing can reference it and nothing can be recovered by it. Tested
+		// AFTER trimming: FuzzTranslateRow found that an id of "/" passed the empty check and
+		// shipped a resource whose ID was "", which every reference to nothing would match.
 		return contract.Resource{}, nil, false
 	}
 
@@ -53,10 +59,6 @@ func translateRow(subscription string, row armResource) (contract.Resource, *con
 	// Parsing the lowercased string instead would leak normalization into name and group,
 	// which are display values the customer selects by, not keys.
 	parsed := parseARMID(original)
-
-	// A trailing slash would stop the id string-equalling a reference to the same
-	// resource written without one, and id equality *is* the identity test.
-	id := strings.ToLower(strings.TrimRight(original, "/"))
 
 	// The id is the normative source (contract.md §2.5) and parsing from one place keeps
 	// type, name and parentId mutually consistent. ARG's own columns answer for ids the
@@ -159,9 +161,12 @@ type armID struct {
 	name         string // original casing: the display value a restore recreates
 	parentID     string // lowercased: it is an id, matched by equality
 
-	// malformed marks an id with an unpaired trailing type segment. Flooring the pair
-	// count would silently produce a confident wrong type, name and parent — the "graph
-	// that looks right and matches nothing" §2.5 opens by warning about.
+	// malformed marks an id with an unpaired trailing type segment, or an empty segment.
+	// Flooring the pair count would silently produce a confident wrong type, name and
+	// parent — the "graph that looks right and matches nothing" §2.5 opens by warning
+	// about. An empty segment ("//" inside the id) is the same failure from the other
+	// side: FuzzParseARMID found that "/providers/ns//x" parsed to the type "ns/" with a
+	// parent ending in a slash, keys that no table row and no reference could ever match.
 	malformed bool
 }
 
@@ -193,6 +198,13 @@ func parseARMID(id string) armID {
 
 	last := -1
 	for i, segment := range segments {
+		if segment == "" {
+			// ARM never emits an empty segment, so this id is not one of ARM's. Type,
+			// name and parent are left unset rather than assembled from the pieces that
+			// happen to be there; translate falls back to ARG's own columns for the first
+			// two and refuses to parent the resource at all.
+			out.malformed = true
+		}
 		if strings.EqualFold(segment, "providers") {
 			last = i
 		}
@@ -213,7 +225,7 @@ func parseARMID(id string) armID {
 	}
 
 	// Need a namespace and at least one type/name pair after it.
-	if last < 0 || len(segments) < last+4 {
+	if out.malformed || last < 0 || len(segments) < last+4 {
 		return out
 	}
 

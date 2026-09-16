@@ -88,16 +88,20 @@ func hostOf(value string) string {
 }
 
 // validHost reports whether a token is a hostname, and returns it normalized.
+//
+// The grammar and the label floor are applied to the NORMALIZED name, after the privatelink
+// label is dropped. Found by FuzzHostsIn: "a.privatelink.com" has three labels and passed,
+// then normalized to "a.com", which has two and is rejected when met on its own; and
+// "a.b.c1.privatelink" passed the grammar, then normalized to a name whose last label is not
+// alphabetic. Either way the index held a key that no reference could ever be tokenized to,
+// and the tokenizer was not stable under its own output. Validating what is actually
+// returned makes the two spellings of one endpoint agree with each other and with the rules.
 func validHost(token string) (string, bool) {
-	token = strings.Trim(token, ".-")
-	if !hostLabels.MatchString(token) {
+	host := normalizeHost(strings.Split(strings.Trim(token, ".-"), "."))
+	if !hostLabels.MatchString(host) || strings.Count(host, ".")+1 < minHostLabels {
 		return "", false
 	}
-	labels := strings.Split(token, ".")
-	if len(labels) < minHostLabels {
-		return "", false
-	}
-	return normalizeHost(labels), true
+	return host, true
 }
 
 // normalizeHost drops the "privatelink" label so that the public and private spellings of the
@@ -195,9 +199,12 @@ func collectPrivateLinkPairs(node any, claim func(host, id string, explicit bool
 	case map[string]any:
 		target, _ := typed["privateLinkServiceId"].(string)
 		fqdns, _ := typed["fqdns"].([]any)
-		if target != "" && len(fqdns) > 0 {
-			// The id is normalized the same way Resource.ID is, so equality is the identity test.
-			normalized := strings.ToLower(strings.TrimRight(target, "/"))
+		// Recognised with the same test link.go applies to every other string, so the id is
+		// normalized exactly as Resource.ID is and equality is the identity test. Found by
+		// FuzzTranslateRow: taking the field verbatim let a value that is not an ARM id at all
+		// become a Dependency.To, which the contract defines as a normalized id - so one
+		// malformed NIC would have put an edge in the estate that no resource could ever match.
+		if normalized, ok := referenceTarget(target); ok && len(fqdns) > 0 {
 			for _, entry := range fqdns {
 				if fqdn, ok := entry.(string); ok {
 					claim(hostOf(fqdn), normalized, true)

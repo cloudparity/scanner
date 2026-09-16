@@ -1,0 +1,80 @@
+name: fuzz
+# Runs every native Go fuzz target (func FuzzXxx in a _test.go) for a fixed budget, one job per
+# target. The parsers under test read what a cloud API returned - ARM resource ids, Resource
+# Graph documents, Kubernetes objects, the Estate itself - so this is the check that a shape
+# nobody wrote a table case for still cannot panic the scanner, ship an id that fails its own
+# normalization, or record a redaction that did not happen.
+#
+# Weekly and on demand, not on every pull request: a fuzz run is a time budget, not a fixed set
+# of cases, so it would make PR checks slow without making them deterministic. Every crasher
+# ever found is committed under testdata/fuzz/ and is a plain test case that `go test ./...`
+# runs in verify.yml on every push - so what fuzzing has found is gated on every change, and
+# only the search for new ones is scheduled.
+on:
+  schedule:
+    - cron: '41 5 * * 3'   # weekly, Wednesday 05:41 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  targets:
+    # Discovers the targets from the code rather than a list here, so a new FuzzXxx is run the
+    # week it lands and a renamed one cannot leave a stale entry behind.
+    name: list fuzz targets
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.list.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+      - name: list
+        id: list
+        # `go test -list` prints each package's matching names followed by an `ok <pkg>` line,
+        # which is what pairs a target with the package it lives in.
+        run: |
+          matrix="$(go test -list '^Fuzz' ./... | awk '
+            /^Fuzz/ { names[n++] = $1 }
+            /^ok / { for (i = 0; i < n; i++) printf "%s %s\n", $2, names[i]; n = 0 }
+          ' | jq -R -s -c 'split("\n") | map(select(length > 0) | split(" ") | {package: .[0], fuzzer: .[1]}) | {include: .}')"
+          echo "$matrix"
+          if [ "$(echo "$matrix" | jq '.include | length')" -eq 0 ]; then
+            echo "no fuzz targets found; a repository that claims to fuzz must have some"
+            exit 1
+          fi
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  fuzz:
+    name: ${{ matrix.fuzzer }}
+    needs: targets
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.targets.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+      - name: fuzz ${{ matrix.fuzzer }}
+        env:
+          PACKAGE: ${{ matrix.package }}
+          FUZZER: ${{ matrix.fuzzer }}
+        run: go test -run='^$' -fuzz="^${FUZZER}\$" -fuzztime=60s "${PACKAGE}"
+      - name: keep the crasher
+        # A failing input is written under the package's testdata/fuzz/<Fuzzer>/. Uploading it
+        # is what lets the fix land with the input as its regression test rather than being
+        # reconstructed from the log.
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: crasher-${{ matrix.fuzzer }}
+          path: '**/testdata/fuzz/${{ matrix.fuzzer }}/*'
+          if-no-files-found: ignore

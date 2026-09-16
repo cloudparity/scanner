@@ -215,6 +215,20 @@ func TestTranslateParsesIDsPerSpec(t *testing.T) {
 			wantType:    "microsoft.keyvault/vaults",
 			wantName:    "kv1",
 		},
+		{
+			// Found by FuzzParseARMID. ARM never emits an empty segment, and assembling a
+			// type from the pieces around one produced "microsoft.web/" with a parent that
+			// ended in a slash - keys nothing could ever match. Same treatment as the odd
+			// id: ARG's columns answer, and the resource is not parented.
+			name:        "an empty segment is malformed and defers to ARG",
+			id:          "/subscriptions/sub-1/resourceGroups/rg/providers/Microsoft.Web//sites/web",
+			argType:     "Microsoft.Web/sites",
+			argName:     "web",
+			wantAccount: "sub-1",
+			wantGroup:   "rg",
+			wantType:    "microsoft.web/sites",
+			wantName:    "web",
+		},
 	}
 
 	for _, tc := range tests {
@@ -584,7 +598,9 @@ func TestTranslateDropsRowsWithNoUsableID(t *testing.T) {
 	got, _ := translate(testSubscription, []armResource{
 		row(map[string]any{"name": "no id at all"}),
 		row(map[string]any{"id": ""}),
-		row(map[string]any{"id": 42}), // not a string
+		row(map[string]any{"id": "/"}),   // found by FuzzTranslateRow: trims to "", the id every reference to nothing matches
+		row(map[string]any{"id": "///"}), // same, with more of it
+		row(map[string]any{"id": 42}),    // not a string
 		row(map[string]any{"id": "/subscriptions/sub-1/resourceGroups/rg/providers/Microsoft.KeyVault/vaults/kv"}),
 	})
 	if len(got) != 1 {
