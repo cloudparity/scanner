@@ -74,7 +74,10 @@ const (
 // that redacts itself travels with the value into every one of those places.
 type Secret string
 
-func (Secret) String() string   { return "<redacted>" }
+// String redacts the value under %v, %s and %+v.
+func (Secret) String() string { return "<redacted>" }
+
+// GoString redacts it under %#v too, which String alone does not reach.
 func (Secret) GoString() string { return `"<redacted>"` }
 
 // Config is one Postgres server and the credential that reaches it.

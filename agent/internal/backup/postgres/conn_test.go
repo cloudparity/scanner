@@ -19,7 +19,7 @@ import (
 // The password used everywhere in this file. Distinctive on purpose: a leak assertion is only
 // worth anything if the needle cannot occur by accident in a host name, a DSN, or a pgconn
 // error template.
-const secret = "hunter2-Zq7-DO-NOT-LOG"
+const secret = "hunter2-Zq7-DO-NOT-LOG" //gosec:disable G101 -- the needle the redaction tests look for, not a credential
 
 func aConfig() Config {
 	return Config{Host: "db.example.com", Port: 5432, Database: "app", User: "vp_stream", Password: secret}
@@ -476,7 +476,7 @@ func configFor(t *testing.T, addr net.Addr) Config {
 	if err != nil {
 		t.Fatalf("split %s: %v", addr, err)
 	}
-	port, err := strconv.Atoi(portText)
+	port, err := strconv.ParseUint(portText, 10, 16)
 	if err != nil {
 		t.Fatalf("port %s: %v", portText, err)
 	}

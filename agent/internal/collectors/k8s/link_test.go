@@ -66,7 +66,7 @@ func TestLinkReportsImageRegistriesAndPodDependencies(t *testing.T) {
 		}}},
 	})
 
-	deps, gaps := link("/subscriptions/s/aks", []contract.Resource{deployment})
+	deps, gaps := link([]contract.Resource{deployment})
 
 	for _, want := range []string{
 		"scheduling.k8s.io/v1/PriorityClass/high",
@@ -108,7 +108,7 @@ func TestLinkStatefulSetServiceAndStorage(t *testing.T) {
 			"template": map[string]any{"spec": map[string]any{}},
 		},
 	})
-	deps, _ := link("/subscriptions/s/aks", []contract.Resource{sts})
+	deps, _ := link([]contract.Resource{sts})
 	for _, want := range []string{
 		"v1/Service/prod/pg-headless",
 		"storage.k8s.io/v1/StorageClass/managed-csi",
@@ -156,7 +156,7 @@ func TestLinkPersistentVolumeUsesTheClaimNamespace(t *testing.T) {
 			"claimRef":         map[string]any{"namespace": "prod", "name": "data-pg-0"},
 		},
 	})
-	deps, _ := link("/subscriptions/s/aks", []contract.Resource{pv})
+	deps, _ := link([]contract.Resource{pv})
 	if !hasDep(deps, "v1/PersistentVolumeClaim/prod/data-pg-0") {
 		t.Errorf("the PV was not linked to the claim it is bound to: %v", deps)
 	}

@@ -91,7 +91,10 @@ func (p *pgSource) Base(ctx context.Context) (backup.Batch, error) {
 type pgChain struct {
 	cfg   backupConfig
 	cloud postgres.ControlPlane
-	out   io.Writer
+	// out is where progress lines go. A line that could not be written is dropped, not acted
+	// on: the log is a courtesy to whoever is watching, and no stdout failure is a reason to
+	// stop a backup or to leave a slot behind. say() is the one place that decision is made.
+	out io.Writer
 
 	conn   *pgconn.PgConn
 	source *pgSource
@@ -140,6 +143,12 @@ var _ interface {
 	Base(context.Context) (backup.Position, error)
 	Cycle(context.Context) (backup.Position, error)
 } = (*pgChain)(nil)
+
+// say writes one progress line to out, discarding a write failure for the reason out's own comment
+// gives.
+func (c *pgChain) say(format string, args ...any) {
+	_, _ = fmt.Fprintf(c.out, format, args...)
+}
 
 func newPGChain(cfg backupConfig, blobs backup.Store, cloud postgres.ControlPlane, out io.Writer) *pgChain {
 	pipeline := &backup.Pipeline{Store: blobs}
@@ -289,7 +298,7 @@ func (c *pgChain) dial(ctx context.Context) error {
 			// apart. Zero over a whole interval is the signal — a healthy wal sender keepalives
 			// whether or not anything is committing.
 			Report: func(l postgres.Lag) {
-				fmt.Fprintf(c.out, "backup lag: behind=%dB messages=%d collected=%s\n",
+				c.say("backup lag: behind=%dB messages=%d collected=%s\n",
 					l.Bytes, l.Messages, l.Took.Round(time.Millisecond))
 			},
 		},
@@ -317,12 +326,12 @@ func (c *pgChain) screen(ctx context.Context, conn *pgconn.PgConn) {
 		// NOT marked done. A screen that could not run has reported nothing, and leaving the flag
 		// set would mean an operator hears about replica identity exactly once, as a failure, and
 		// never again for the life of the process.
-		fmt.Fprintf(c.out, "backup: could not screen the tables for replica identity: %v\n", err)
+		c.say("backup: could not screen the tables for replica identity: %v\n", err)
 		return
 	}
 	c.screened = true
 	if warning := postgres.Warning(found); warning != "" {
-		fmt.Fprintln(c.out, warning)
+		c.say("%s\n", warning)
 	}
 }
 
@@ -362,7 +371,7 @@ func (c *pgChain) release(ctx context.Context) error {
 		return fmt.Errorf("%w: %w", postgres.ErrSlotLeaked, err)
 	}
 	c.created = false
-	fmt.Fprintf(c.out, "backup: replication slot %q dropped\n", c.cfg.slot)
+	c.say("backup: replication slot %q dropped\n", c.cfg.slot)
 	return nil
 }
 

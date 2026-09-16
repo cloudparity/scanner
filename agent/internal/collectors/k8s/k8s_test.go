@@ -212,9 +212,9 @@ func TestWorkloadDependenciesAreFound(t *testing.T) {
 		    {"name":"v1","configMap":{"name":"vol-config"}},
 		    {"name":"v2","secret":{"secretName":"vol-secret"}},
 		    {"name":"v3","persistentVolumeClaim":{"claimName":"data"}}]}}}}`)})
-	deps, _ := link(testCluster, resources)
+	deps, _ := link(resources)
 
-	want := map[string]string{
+	want := map[string]string{ //gosec:disable G101 -- object references (a Secret NAME), not credentials
 		"spec.template.spec.serviceAccountName":                          "v1/ServiceAccount/prod/api-sa",
 		"spec.template.spec.imagePullSecrets[0]":                         "v1/Secret/prod/registry-cred",
 		"spec.template.spec.containers[0].envFrom[0].configMapRef":       "v1/ConfigMap/prod/api-config",
@@ -244,12 +244,12 @@ func TestIngressLinksToItsServiceAndTLSSecret(t *testing.T) {
 		  "tls":[{"hosts":["app.example.com"],"secretName":"app-tls"}],
 		  "rules":[{"host":"app.example.com","http":{"paths":[
 		    {"path":"/","backend":{"service":{"name":"api","port":{"number":80}}}}]}}]}}`)})
-	deps, _ := link(testCluster, resources)
+	deps, _ := link(resources)
 	found := map[string]string{}
 	for _, d := range deps {
 		found[d.Via] = d.To
 	}
-	for via, to := range map[string]string{
+	for via, to := range map[string]string{ //gosec:disable G101 -- object references (a Secret NAME), not credentials
 		"spec.tls[0].secretName":                      "v1/Secret/prod/app-tls",
 		"spec.rules[0].http.paths[0].backend.service": "v1/Service/prod/api",
 		"spec.ingressClassName":                       "networking.k8s.io/v1/IngressClass/nginx",
@@ -423,7 +423,7 @@ func TestBindingLinksToItsRoleAndSubjects(t *testing.T) {
 		    {"kind":"ServiceAccount","name":"api-sa"},
 		    {"kind":"ServiceAccount","name":"other-sa","namespace":"staging"},
 		    {"kind":"User","name":"someone@example.com"}]}`)})
-	deps, _ := link(testCluster, resources)
+	deps, _ := link(resources)
 	found := map[string]string{}
 	for _, d := range deps {
 		found[d.Via] = d.To
@@ -451,7 +451,7 @@ func TestClusterRoleBindingRoleRefIsNotNamespaced(t *testing.T) {
 		[]map[string]any{obj(`{"metadata":{"name":"crb"},
 		  "roleRef":{"kind":"ClusterRole","name":"view"},
 		  "subjects":[{"kind":"ServiceAccount","name":"sa","namespace":"prod"}]}`)})
-	deps, _ := link(testCluster, resources)
+	deps, _ := link(resources)
 	for _, d := range deps {
 		if d.Via == "roleRef" && d.To != "rbac.authorization.k8s.io/v1/ClusterRole/view" {
 			t.Errorf("roleRef = %q, want an unnamespaced ClusterRole id", d.To)
@@ -465,7 +465,7 @@ func TestCronJobPodSpecIsReached(t *testing.T) {
 		[]map[string]any{obj(`{"metadata":{"name":"nightly","namespace":"prod"},"spec":{"jobTemplate":{
 		  "spec":{"template":{"spec":{"containers":[{"name":"c",
 		    "envFrom":[{"secretRef":{"name":"job-creds"}}]}]}}}}}}`)})
-	deps, _ := link(testCluster, resources)
+	deps, _ := link(resources)
 	var found bool
 	for _, d := range deps {
 		if d.To == "v1/Secret/prod/job-creds" {
@@ -485,7 +485,7 @@ func TestBarePodSpecIsReadDirectly(t *testing.T) {
 	resources, _ := translate(testCluster, kindSpec{apiVersion: "v1", kind: "Pod"},
 		[]map[string]any{obj(`{"metadata":{"name":"p","namespace":"prod"},
 		  "spec":{"serviceAccountName":"pod-sa","containers":[{"name":"c"}]}}`)})
-	deps, _ := link(testCluster, resources)
+	deps, _ := link(resources)
 	var found bool
 	for _, d := range deps {
 		if d.To == "v1/ServiceAccount/prod/pod-sa" && d.Via == "spec.serviceAccountName" {
@@ -503,7 +503,7 @@ func TestPVCLinksToItsStorageClass(t *testing.T) {
 	resources, _ := translate(testCluster, kindSpec{apiVersion: "v1", kind: "PersistentVolumeClaim"},
 		[]map[string]any{obj(`{"metadata":{"name":"data","namespace":"prod"},
 		  "spec":{"storageClassName":"managed-csi","resources":{"requests":{"storage":"8Gi"}}}}`)})
-	deps, _ := link(testCluster, resources)
+	deps, _ := link(resources)
 	if len(deps) != 1 || deps[0].To != "storage.k8s.io/v1/StorageClass/managed-csi" {
 		t.Errorf("deps = %+v, want one link to the StorageClass", deps)
 	}
@@ -515,7 +515,7 @@ func TestHPALinksToWhatItScales(t *testing.T) {
 		[]map[string]any{obj(`{"metadata":{"name":"api-hpa","namespace":"prod"},
 		  "spec":{"scaleTargetRef":{"apiVersion":"apps/v1","kind":"Deployment","name":"api"},
 		  "minReplicas":2,"maxReplicas":10}}`)})
-	deps, _ := link(testCluster, resources)
+	deps, _ := link(resources)
 	if len(deps) != 1 || deps[0].To != "apps/v1/Deployment/prod/api" {
 		t.Errorf("deps = %+v, want one link to the scaled Deployment", deps)
 	}
@@ -527,7 +527,7 @@ func TestWorkloadIdentityAnnotationIsReported(t *testing.T) {
 	resources, _ := translate(testCluster, kindSpec{apiVersion: "v1", kind: "ServiceAccount"},
 		[]map[string]any{obj(`{"metadata":{"name":"api-sa","namespace":"prod","annotations":{
 		  "azure.workload.identity/client-id":"3d1310f7-0ca3-4f69-acb9-da82ec15cea7"}}}`)})
-	_, gaps := link(testCluster, resources)
+	_, gaps := link(resources)
 	var found bool
 	for _, g := range gaps {
 		if strings.Contains(g.Detail, "3d1310f7-0ca3-4f69-acb9-da82ec15cea7") {
@@ -547,7 +547,7 @@ func TestUnresolvedReferenceIsOutOfScan(t *testing.T) {
 	resources, _ := translate(testCluster, kindSpec{apiVersion: "apps/v1", kind: "Deployment"},
 		[]map[string]any{obj(`{"metadata":{"name":"api","namespace":"prod"},"spec":{"template":{"spec":{
 		  "containers":[{"name":"c","envFrom":[{"configMapRef":{"name":"never-collected"}}]}]}}}}`)})
-	deps, _ := link(testCluster, resources)
+	deps, _ := link(resources)
 	if len(deps) != 1 {
 		t.Fatalf("deps = %+v", deps)
 	}
@@ -563,7 +563,7 @@ func TestDuplicateDependenciesCollapse(t *testing.T) {
 		  "containers":[
 		    {"name":"a","envFrom":[{"configMapRef":{"name":"cfg"}}]},
 		    {"name":"b","envFrom":[{"configMapRef":{"name":"cfg"}}]}]}}}}`)})
-	deps, _ := link(testCluster, resources)
+	deps, _ := link(resources)
 	// Two containers, same ConfigMap, DIFFERENT paths - so two dependencies is correct here. What must
 	// never happen is the identical triple appearing twice.
 	seen := map[string]int{}
@@ -579,7 +579,7 @@ func TestDuplicateDependenciesCollapse(t *testing.T) {
 
 // An unreadable stored document must be reported, not skipped.
 func TestUnreadableDocumentIsReported(t *testing.T) {
-	_, gaps := link(testCluster, []contract.Resource{{
+	_, gaps := link([]contract.Resource{{
 		ID: "apps/v1/Deployment/prod/api", Type: "apps/v1/deployment",
 		Document: []byte("{not json"),
 	}})
@@ -789,7 +789,7 @@ func TestUnscannedKindInAScannedNamespaceIsChildOfScanned(t *testing.T) {
 	owned, _ := translate(testCluster, kindSpec{apiVersion: "v1", kind: "Secret"},
 		[]map[string]any{obj(`{"metadata":{"name":"s","namespace":"prod","ownerReferences":[
 		  {"apiVersion":"helm.toolkit.fluxcd.io/v2","kind":"HelmRelease","name":"app"}]}}`)})
-	deps, _ := link(testCluster, append(resources, owned...))
+	deps, _ := link(append(resources, owned...))
 
 	if len(deps) != 1 {
 		t.Fatalf("deps = %+v, want one owner edge", deps)
@@ -808,7 +808,7 @@ func TestOutOfScanCarriesNoResolvedTo(t *testing.T) {
 	resources, _ := translate(testCluster, kindSpec{apiVersion: "v1", kind: "Secret"},
 		[]map[string]any{obj(`{"metadata":{"name":"s","namespace":"unscanned-ns","ownerReferences":[
 		  {"apiVersion":"g/v1","kind":"Thing","name":"t"}]}}`)})
-	deps, _ := link(testCluster, resources)
+	deps, _ := link(resources)
 	for _, d := range deps {
 		if d.Resolution == contract.ResolutionOutOfScan && d.ResolvedTo != "" {
 			t.Errorf("out-of-scan carries resolvedTo %q", d.ResolvedTo)
@@ -829,7 +829,7 @@ func TestMalformedReferencesProduceNoEdge(t *testing.T) {
 	} {
 		resources, _ := translate(testCluster, kindSpec{apiVersion: "apps/v1", kind: "Deployment"},
 			[]map[string]any{obj(raw)})
-		deps, _ := link(testCluster, resources)
+		deps, _ := link(resources)
 		for _, d := range deps {
 			// A well-formed k8s id has no empty segment.
 			for _, seg := range strings.Split(d.To, "/") {
@@ -849,7 +849,7 @@ func TestHPAWithNoAPIVersionStillResolves(t *testing.T) {
 	hpa, _ := translate(testCluster, kindSpec{apiVersion: "autoscaling/v2", kind: "HorizontalPodAutoscaler"},
 		[]map[string]any{obj(`{"metadata":{"name":"h","namespace":"prod"},
 		  "spec":{"scaleTargetRef":{"kind":"Deployment","name":"api"}}}`)})
-	deps, _ := link(testCluster, append(target, hpa...))
+	deps, _ := link(append(target, hpa...))
 	var found bool
 	for _, d := range deps {
 		if d.To == "apps/v1/Deployment/prod/api" && d.Resolution == contract.ResolutionInScan {
@@ -869,7 +869,7 @@ func TestWorkloadIdentityIsDeclaredOnceNotPerServiceAccount(t *testing.T) {
 		  "azure.workload.identity/client-id":"guid-`+n+`"}}}`))
 	}
 	resources, _ := translate(testCluster, kindSpec{apiVersion: "v1", kind: "ServiceAccount"}, items)
-	_, gaps := link(testCluster, resources)
+	_, gaps := link(resources)
 	var n int
 	for _, g := range gaps {
 		if g.Target == "azure-workload-identity-bindings" {

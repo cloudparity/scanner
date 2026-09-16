@@ -32,6 +32,7 @@ const RedactedValue = "[REDACTED]"
 // value any engine-side code branches on.
 type Provider string
 
+// The providers a collector can claim to have read.
 const (
 	ProviderAzure Provider = "azure"
 	ProviderAWS   Provider = "aws"

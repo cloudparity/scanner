@@ -90,7 +90,7 @@ func TestScreenNeverRedacts(t *testing.T) {
 // The three fields contract.md §2.4 names as what a `key|secret|token` sweep destroys. The
 // heuristic exists precisely to not be that sweep, so this is its most important test.
 func TestScreenNeverFlagsJoinKeys(t *testing.T) {
-	joinKeys := map[string]string{
+	joinKeys := map[string]string{ //gosec:disable G101 -- the join keys are URLs and ids; the test is that they are NOT secrets
 		"keyVaultUri":                 "https://kv.vault.azure.net/",
 		"sshPublicKey":                "ssh-rsa AAAAB3Nza",
 		"privateDnsZoneArmResourceId": "/subscriptions/sub-1/providers/Microsoft.Network/privateDnsZones/z",

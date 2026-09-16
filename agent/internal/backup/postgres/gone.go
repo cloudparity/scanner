@@ -92,6 +92,8 @@ func checkSlot(ctx context.Context, q querySQL, slot string) error {
 		return err
 	}
 
+	// Not an injection: slot is allow-listed to [a-z0-9_]{1,63} by validateSlotName above, and a
+	// replication connection has no bind parameters to use instead (AD-036).
 	const query = "SELECT slot_name FROM pg_replication_slots WHERE slot_name = '%s'"
 	rows, err := q(ctx, fmt.Sprintf(query, slot))
 	if err != nil {

@@ -31,7 +31,7 @@ import (
 //	NetworkPolicy     Also pure label selectors, plus CIDR blocks.
 //
 // link records every pointer the collected objects hold.
-func link(clusterID string, resources []contract.Resource) ([]contract.Dependency, []contract.Gap) {
+func link(resources []contract.Resource) ([]contract.Dependency, []contract.Gap) {
 	known := make(map[string]struct{}, len(resources))
 	for _, r := range resources {
 		known[r.ID] = struct{}{}

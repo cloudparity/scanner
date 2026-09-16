@@ -182,11 +182,12 @@ func main() {
 		// otherwise, so this line on its own reads a container and prints what it would do.
 		os.Exit(pruneCommand(os.Args[2:]))
 	case "closure":
-		// TODO(wed): load Estate from --estate; parse --select rg=/tag=/ids=.
+		// Not implemented: loading the Estate from --estate and parsing --select is
+		// https://github.com/cloudparity/scanner/issues/8.
 		_ = plan.Closure(contract.Estate{}, contract.Selection{})
 		fmt.Println("closure: not implemented yet")
 	case "serve":
-		// TODO(thu): serve contract §5 endpoints for the dashboard.
+		// Not implemented: the contract §5 endpoints are https://github.com/cloudparity/scanner/issues/9.
 		fmt.Println("serve: not implemented yet")
 	default:
 		usage()

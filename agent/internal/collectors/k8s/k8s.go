@@ -115,7 +115,7 @@ func (c *Collector) Collect(ctx context.Context) ([]contract.Resource, []contrac
 
 	gaps = append(gaps, customResourceGap(c.clusterID))
 
-	dependencies, linkGaps := link(c.clusterID, resources)
+	dependencies, linkGaps := link(resources)
 	return resources, dependencies, append(gaps, linkGaps...), nil
 }
 

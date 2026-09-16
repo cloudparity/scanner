@@ -300,7 +300,7 @@ func (c *countingLink) ReplyAlive(ctx context.Context) error {
 	c.mu.Lock()
 	c.alive++
 	c.mu.Unlock()
-	return c.link.ReplyAlive(ctx) //nolint:staticcheck // the embedded field, not this method
+	return c.link.ReplyAlive(ctx)
 }
 
 func (c *countingLink) replies() int {
@@ -376,7 +376,7 @@ func waitForFlush(ctx context.Context, t *testing.T, id, slot, was string) {
 // the newline, and the statement travels over stdin for the reason psql() gives.
 func psqlRead(ctx context.Context, t *testing.T, id, sql string) string {
 	t.Helper()
-	cmd := exec.CommandContext(ctx, "docker", "exec", "-i", id,
+	cmd := exec.CommandContext(ctx, "docker", "exec", "-i", id, //gosec:disable G204 -- a throwaway container this test started
 		"psql", "-U", "postgres", "-v", "ON_ERROR_STOP=1", "-tAq")
 	cmd.Stdin = strings.NewReader(sql)
 	out, err := cmd.CombinedOutput()

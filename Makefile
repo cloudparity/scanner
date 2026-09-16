@@ -19,8 +19,15 @@ vet:
 	# (it fills a real Azure disk), so type-checking it is the only thing standing between it and rot.
 	go vet -tags docker,testbed ./...
 
+# A missing linter is a failure, not a skip. The previous `&& run || echo skipping` fired the
+# echo when golangci-lint was installed and FOUND SOMETHING too, so `make all` could never fail
+# on a lint finding. The set it runs is .golangci.yml; a finding is fixed at the line, not here.
 lint:
-	@command -v golangci-lint >/dev/null && golangci-lint run ./... || echo "golangci-lint not installed — skipping (install for full checks)"
+	@command -v golangci-lint >/dev/null || { \
+	  echo "golangci-lint is not installed. Install it: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest"; \
+	  exit 1; \
+	}
+	golangci-lint run ./...
 
 test:
 	go test ./...

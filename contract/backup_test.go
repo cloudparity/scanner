@@ -406,13 +406,13 @@ func TestReBaseGolden(t *testing.T) {
 
 	path := filepath.Join("testdata", "rebase.golden.json")
 	if *update {
-		if err := os.WriteFile(path, got, 0o644); err != nil {
+		if err := os.WriteFile(path, got, 0o600); err != nil {
 			t.Fatalf("write golden: %v", err)
 		}
 		return
 	}
 
-	want, err := os.ReadFile(path)
+	want, err := os.ReadFile(path) //gosec:disable G304 -- a golden file under testdata/
 	if err != nil {
 		t.Fatalf("read golden (run: go test ./contract -update): %v", err)
 	}
@@ -432,13 +432,13 @@ func TestManifestGolden(t *testing.T) {
 
 	path := filepath.Join("testdata", "manifest.golden.json")
 	if *update {
-		if err := os.WriteFile(path, got, 0o644); err != nil {
+		if err := os.WriteFile(path, got, 0o600); err != nil {
 			t.Fatalf("write golden: %v", err)
 		}
 		return
 	}
 
-	want, err := os.ReadFile(path)
+	want, err := os.ReadFile(path) //gosec:disable G304 -- a golden file under testdata/
 	if err != nil {
 		t.Fatalf("read golden (run: go test ./contract -update): %v", err)
 	}
@@ -459,13 +459,13 @@ func TestChainGolden(t *testing.T) {
 
 	path := filepath.Join("testdata", "chain.golden.json")
 	if *update {
-		if err := os.WriteFile(path, got, 0o644); err != nil {
+		if err := os.WriteFile(path, got, 0o600); err != nil {
 			t.Fatalf("write golden: %v", err)
 		}
 		return
 	}
 
-	want, err := os.ReadFile(path)
+	want, err := os.ReadFile(path) //gosec:disable G304 -- a golden file under testdata/
 	if err != nil {
 		t.Fatalf("read golden (run: go test ./contract -update): %v", err)
 	}
@@ -725,13 +725,13 @@ func TestCycleReportGolden(t *testing.T) {
 
 			path := filepath.Join("testdata", tc.file)
 			if *update {
-				if err := os.WriteFile(path, got, 0o644); err != nil {
+				if err := os.WriteFile(path, got, 0o600); err != nil {
 					t.Fatalf("write golden: %v", err)
 				}
 				return
 			}
 
-			want, err := os.ReadFile(path)
+			want, err := os.ReadFile(path) //gosec:disable G304 -- a golden file under testdata/
 			if err != nil {
 				t.Fatalf("read golden (run: go test ./contract -update): %v", err)
 			}

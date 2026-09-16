@@ -366,7 +366,7 @@ func TestQueryResourcesRefusesToPageForever(t *testing.T) {
 	// It gives up after a bound so that a regression fails this test in milliseconds
 	// instead of spinning until the go test timeout.
 	calls := 0
-	stuck := func(_ context.Context, q armresourcegraph.QueryRequest, _ *armresourcegraph.ClientResourcesOptions) (armresourcegraph.ClientResourcesResponse, error) {
+	stuck := func(_ context.Context, _ armresourcegraph.QueryRequest, _ *armresourcegraph.ClientResourcesOptions) (armresourcegraph.ClientResourcesResponse, error) {
 		calls++
 		if calls > 10 {
 			return armresourcegraph.ClientResourcesResponse{}, errors.New("the pager never stopped")

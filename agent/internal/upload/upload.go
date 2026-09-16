@@ -91,7 +91,9 @@ func (c *Client) Send(ctx context.Context, e *contract.Estate) (Result, error) {
 		// The URL can appear in an error; the key never can, because it only ever lives in a header.
 		return Result{}, fmt.Errorf("upload: %w", err)
 	}
-	defer resp.Body.Close()
+	// Close's error is dropped here and below: the body is read to its bound first, and a failure
+	// to release the connection afterwards is not a failed upload.
+	defer func() { _ = resp.Body.Close() }()
 
 	// Bounded: a proxy or a captive portal can answer with a page of HTML, and that should not become
 	// a megabyte of error message in a customer's log.
@@ -100,24 +102,24 @@ func (c *Client) Send(ctx context.Context, e *contract.Estate) (Result, error) {
 		return Result{}, fmt.Errorf("upload: reading the response: %w", err)
 	}
 
-	switch {
-	case resp.StatusCode == http.StatusCreated:
+	switch resp.StatusCode {
+	case http.StatusCreated:
 		var out Result
 		if err := json.Unmarshal(raw, &out); err != nil {
 			return Result{}, fmt.Errorf("upload: the api accepted the scan but its reply was unreadable: %w", err)
 		}
 		return out, nil
 
-	case resp.StatusCode == http.StatusUnauthorized:
+	case http.StatusUnauthorized:
 		// The single most likely failure in the field, and the one worth naming precisely rather than
 		// printing a status code at somebody.
 		return Result{}, errors.New("upload: the api key was refused - check it is the whole key, " +
 			"that it has not been revoked, and that it belongs to this account")
 
-	case resp.StatusCode == http.StatusRequestEntityTooLarge:
+	case http.StatusRequestEntityTooLarge:
 		return Result{}, fmt.Errorf("upload: the estate is too large for the api (%d resources)", e.Scan.ResourceCount)
 
-	case resp.StatusCode == http.StatusBadRequest:
+	case http.StatusBadRequest:
 		return Result{}, rejected("estate", raw)
 
 	default:
@@ -178,7 +180,7 @@ func (c *Client) SendCycle(ctx context.Context, r *contract.CycleReport) error {
 		// never can, because it only ever lives in a header.
 		return fmt.Errorf("upload: the cycle report was not sent: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 	if err != nil {
@@ -207,13 +209,13 @@ func (c *Client) SendCycle(ctx context.Context, r *contract.CycleReport) error {
 
 // snippet keeps an unexpected response readable in a log.
 func snippet(raw []byte) string {
-	const max = 200
+	const limit = 200
 	s := strings.TrimSpace(string(raw))
 	if s == "" {
 		return "(no body)"
 	}
-	if len(s) > max {
-		return s[:max] + "…"
+	if len(s) > limit {
+		return s[:limit] + "…"
 	}
 	return s
 }

@@ -33,7 +33,7 @@ import (
 // Standard in-cluster projected service-account paths. Present in every pod unless a customer
 // deliberately disables the projection.
 const (
-	tokenPath     = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+	tokenPath     = "/var/run/secrets/kubernetes.io/serviceaccount/token" //gosec:disable G101 -- the path to a token, not a token
 	caPath        = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
 	namespacePath = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
 )
@@ -86,7 +86,7 @@ func newInClusterClient() (*apiClient, string, error) {
 	} else {
 		// The in-cluster default (AD-024).
 		tokenFile := envOr("PARITY_K8S_TOKEN_FILE", tokenPath)
-		if _, err := os.ReadFile(tokenFile); err != nil {
+		if _, err := os.ReadFile(tokenFile); err != nil { //gosec:disable G304 -- PARITY_K8S_TOKEN_FILE is an operator override by design (AD-024)
 			return nil, "", fmt.Errorf("read service account token %s: %w. If this is meant to run "+
 				"OUTSIDE the cluster against an Azure-RBAC cluster, set PARITY_K8S_AUTH=entra to "+
 				"authenticate with a managed identity instead", tokenFile, err)
@@ -107,7 +107,7 @@ func newInClusterClient() (*apiClient, string, error) {
 	// for the CA and nothing else.
 	var pool *x509.CertPool
 	caFile := envOr("PARITY_K8S_CA_FILE", caPath)
-	if pem, err := os.ReadFile(caFile); err == nil {
+	if pem, err := os.ReadFile(caFile); err == nil { //gosec:disable G304 -- PARITY_K8S_CA_FILE is an operator override by design (AD-024)
 		pool = x509.NewCertPool()
 		if !pool.AppendCertsFromPEM(pem) {
 			return nil, "", fmt.Errorf("cluster CA %s contains no usable certificate; every request "+
@@ -200,7 +200,9 @@ func (c *apiClient) get(ctx context.Context, path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	// Close's error is dropped: the body has been read (or bounded) by then, and a failure to
+	// release the connection is nothing this caller can act on.
+	defer func() { _ = resp.Body.Close() }()
 
 	// Bounded: an API server returning an unbounded stream must not exhaust the job's 1 GiB.
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))

@@ -476,7 +476,7 @@ func TestTranslateRedactsEverySeedListedValue(t *testing.T) {
 // the dependency graph in a way no test notices". Each is presented to the rules ALONE, so
 // this asserts something the value checks above cannot: that no rule can reach it.
 func TestTranslateNeverRedactsJoinKeys(t *testing.T) {
-	joinKeys := map[string]string{
+	joinKeys := map[string]string{ //gosec:disable G101 -- the join keys are URLs and ids; the test is that they are NOT secrets
 		"keyVaultUri":                 "https://kv.vault.azure.net/",
 		"sshPublicKey":                "ssh-rsa AAAA",
 		"privateDnsZoneArmResourceId": "/subscriptions/sub-1/resourceGroups/rg/providers/Microsoft.Network/privateDnsZones/z",

@@ -352,7 +352,7 @@ func TestTheLogLineIsWrittenEvenWhenTheSendIsNot(t *testing.T) {
 	to := &caught{err: errors.New("upload: the api returned 404")}
 	send := Send{
 		To: to, Chain: scope, Account: account,
-		Manifest: func() *contract.Manifest { return manifest() },
+		Manifest: manifest,
 		Also:     schedule.Log{To: &lines},
 		Errs:     &strings.Builder{},
 	}
@@ -399,7 +399,7 @@ func refusing(t *testing.T, status int) (*upload.Client, func() int) {
 		w.WriteHeader(status)
 	}))
 	t.Cleanup(s.Close)
-	return &upload.Client{BaseURL: s.URL, APIKey: "parity_testkey", HTTP: s.Client()},
+	return &upload.Client{BaseURL: s.URL, APIKey: "parity_testkey", HTTP: s.Client()}, //gosec:disable G101 -- a stub server accepts any key; this one is a fixture
 		func() int { mu.Lock(); defer mu.Unlock(); return hits }
 }
 
@@ -415,7 +415,7 @@ func TestARefusedSendCostsALineAndNothingElse(t *testing.T) {
 			var errs, lines strings.Builder
 			send := Send{
 				To: client, Chain: scope, Account: account,
-				Manifest: func() *contract.Manifest { return manifest() },
+				Manifest: manifest,
 				Also:     schedule.Log{To: &lines},
 				Errs:     &errs,
 			}
@@ -448,7 +448,7 @@ func TestAnApiThatNeverAnswersDoesNotHoldTheLoop(t *testing.T) {
 		To:       &upload.Client{BaseURL: s.URL, APIKey: "k", HTTP: s.Client()},
 		Chain:    scope,
 		Account:  account,
-		Manifest: func() *contract.Manifest { return manifest() },
+		Manifest: manifest,
 		Timeout:  150 * time.Millisecond,
 		Errs:     &errs,
 	}

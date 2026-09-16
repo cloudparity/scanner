@@ -153,7 +153,9 @@ func (s Send) Report(ctx context.Context, f schedule.Fact) {
 	// row is the wrong trade. Saying so on every rolling restart would make this the alarm people
 	// learn to skip, which is the brake's own argument about a warning that always fires.
 	if err != nil && s.Errs != nil && ctx.Err() == nil {
-		fmt.Fprintf(s.Errs, "backup: this cycle was not reported to the control plane, and the "+
+		// The write's own error is dropped: Errs is a log, and a log that cannot be written is
+		// not a second thing to report to itself.
+		_, _ = fmt.Fprintf(s.Errs, "backup: this cycle was not reported to the control plane, and the "+
 			"backup itself is unaffected — the objects and the manifest are in the store: %v\n", err)
 	}
 }

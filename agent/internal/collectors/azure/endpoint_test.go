@@ -31,7 +31,7 @@ func resourceNamed(id, name string, properties map[string]any) contract.Resource
 }
 
 func TestHostOfExtractsTheHostname(t *testing.T) {
-	cases := map[string]string{
+	cases := map[string]string{ //gosec:disable G101 -- vault URLs, not credentials
 		"https://cloud-parity-vault.vault.azure.net/":                    "cloud-parity-vault.vault.azure.net",
 		"https://cloud-parity-vault.vault.azure.net/secrets/db-password": "cloud-parity-vault.vault.azure.net",
 		"https://cloudparitysa.blob.core.windows.net":                    "cloudparitysa.blob.core.windows.net",
@@ -216,7 +216,7 @@ func TestLinkEmitsNoSelfEdgeFromAResourcesOwnEndpoint(t *testing.T) {
 // parses it - foreignAccountGaps among them. The limitation is declared statically in unreadGaps(allTypesPresent()).
 func TestLinkNeverPutsAHostnameInReferenceTo(t *testing.T) {
 	refs, _ := link([]contract.Resource{
-		resourceNamed(epApp, "cloud-parity-container", map[string]any{
+		resourceNamed(epApp, "cloud-parity-container", map[string]any{ //gosec:disable G101 -- a vault URL, not a credential
 			"secretUri": "https://someone-elses-vault.vault.azure.net/secrets/x",
 		}),
 	})

@@ -295,6 +295,9 @@ func alreadyOnTheServer(slot string, err error) error {
 // is an error rather than an empty Position — a Position nothing can resume from would send the
 // first Since to the beginning of the WAL or to nowhere, and both are found at restore.
 func slotPosition(ctx context.Context, q querySQL, slot string) (backup.Position, error) {
+	// Not an injection: every caller has just put slot through validateSlotName, which allow-lists
+	// it to [a-z0-9_]{1,63} — baseCopy directly, since.go via checkSlot — and a replication
+	// connection has no bind parameters to use instead (AD-036).
 	const query = "SELECT confirmed_flush_lsn FROM pg_replication_slots WHERE slot_name = '%s'"
 
 	rows, err := q(ctx, fmt.Sprintf(query, slot))

@@ -38,7 +38,7 @@ import (
 // vaultTokenScope is the Key Vault data plane audience. Distinct from ARM: a management-plane
 // token is rejected here, which is why this needs its own credential call rather than reusing the
 // ARM pipeline.
-const vaultTokenScope = "https://vault.azure.net/.default"
+const vaultTokenScope = "https://vault.azure.net/.default" //gosec:disable G101 -- an OAuth scope, not a credential
 
 // vaultAPIVersion is pinned for the same reason every childSpec pins one: an unpinned call is a
 // silent behaviour change whenever the service ships a new version.

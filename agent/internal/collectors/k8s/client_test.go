@@ -21,6 +21,9 @@ import (
 // Plain HTTP rather than TLS: http.Transport ignores TLSClientConfig for an http:// URL, so this
 // exercises newInClusterClient, get and List end to end without certificate machinery that would
 // test the standard library rather than this code.
+//
+// Handlers here discard fmt.Fprint's result: a reply the client did not get fails the assertion
+// on the client side, which is where every test looks.
 func withFakeAPI(t *testing.T, handler http.HandlerFunc) *apiClient {
 	t.Helper()
 	server := httptest.NewServer(handler)
@@ -49,11 +52,11 @@ func TestListWalksEveryPage(t *testing.T) {
 		seen = append(seen, r.URL.Query().Get("continue"))
 		switch r.URL.Query().Get("continue") {
 		case "":
-			fmt.Fprint(w, `{"items":[{"metadata":{"name":"a"}}],"metadata":{"continue":"tok-1"}}`)
+			_, _ = fmt.Fprint(w, `{"items":[{"metadata":{"name":"a"}}],"metadata":{"continue":"tok-1"}}`)
 		case "tok-1":
-			fmt.Fprint(w, `{"items":[{"metadata":{"name":"b"}}],"metadata":{"continue":"tok-2"}}`)
+			_, _ = fmt.Fprint(w, `{"items":[{"metadata":{"name":"b"}}],"metadata":{"continue":"tok-2"}}`)
 		default:
-			fmt.Fprint(w, `{"items":[{"metadata":{"name":"c"}}],"metadata":{"continue":""}}`)
+			_, _ = fmt.Fprint(w, `{"items":[{"metadata":{"name":"c"}}],"metadata":{"continue":""}}`)
 		}
 	})
 
@@ -79,7 +82,7 @@ func TestListSendsTheBearerTokenAndAsksForJSON(t *testing.T) {
 	client := withFakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
 		auth, accept = r.Header.Get("Authorization"), r.Header.Get("Accept")
 		limit = r.URL.Query().Get("limit")
-		fmt.Fprint(w, `{"items":[]}`)
+		_, _ = fmt.Fprint(w, `{"items":[]}`)
 	})
 	if _, err := client.List(context.Background(), "/api/v1/pods"); err != nil {
 		t.Fatal(err)
@@ -99,7 +102,7 @@ func TestListSendsTheBearerTokenAndAsksForJSON(t *testing.T) {
 // A server that keeps handing back a continue token must not turn a scan into an unbounded loop.
 func TestListStopsAtThePageBudget(t *testing.T) {
 	client := withFakeAPI(t, func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprint(w, `{"items":[{"metadata":{"name":"x"}}],"metadata":{"continue":"never-ends"}}`)
+		_, _ = fmt.Fprint(w, `{"items":[{"metadata":{"name":"x"}}],"metadata":{"continue":"never-ends"}}`)
 	})
 	_, err := client.List(context.Background(), "/api/v1/configmaps")
 	if err == nil {
@@ -115,7 +118,7 @@ func TestListStopsAtThePageBudget(t *testing.T) {
 func TestNon200KeepsTheServerMessage(t *testing.T) {
 	client := withFakeAPI(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
-		fmt.Fprint(w, `{"kind":"Status","reason":"Forbidden","message":"deployments.apps is forbidden"}`)
+		_, _ = fmt.Fprint(w, `{"kind":"Status","reason":"Forbidden","message":"deployments.apps is forbidden"}`)
 	})
 	_, err := client.List(context.Background(), "/apis/apps/v1/deployments")
 	if err == nil {
@@ -138,7 +141,7 @@ func TestNon200KeepsTheServerMessage(t *testing.T) {
 
 func TestListRejectsAMalformedBody(t *testing.T) {
 	client := withFakeAPI(t, func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprint(w, `{"items": not json`)
+		_, _ = fmt.Fprint(w, `{"items": not json`)
 	})
 	if _, err := client.List(context.Background(), "/api/v1/configmaps"); err == nil {
 		t.Fatal("a malformed body produced no error")
@@ -150,7 +153,7 @@ func TestListHonoursContextCancellation(t *testing.T) {
 	calls := 0
 	client := withFakeAPI(t, func(w http.ResponseWriter, _ *http.Request) {
 		calls++
-		fmt.Fprint(w, `{"items":[],"metadata":{"continue":"more"}}`)
+		_, _ = fmt.Fprint(w, `{"items":[],"metadata":{"continue":"more"}}`)
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -242,15 +245,15 @@ func TestCollectEndToEndThroughTheRealClient(t *testing.T) {
 	client := withFakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/namespaces":
-			fmt.Fprint(w, `{"items":[{"metadata":{"name":"prod"}}]}`)
+			_, _ = fmt.Fprint(w, `{"items":[{"metadata":{"name":"prod"}}]}`)
 		case "/apis/apps/v1/deployments":
-			fmt.Fprint(w, `{"items":[{"metadata":{"name":"api","namespace":"prod"},
+			_, _ = fmt.Fprint(w, `{"items":[{"metadata":{"name":"api","namespace":"prod"},
 			  "spec":{"template":{"spec":{"containers":[{"name":"c",
 			  "envFrom":[{"configMapRef":{"name":"cfg"}}]}]}}}}]}`)
 		case "/api/v1/configmaps":
-			fmt.Fprint(w, `{"items":[{"metadata":{"name":"cfg","namespace":"prod"},"data":{"k":"v"}}]}`)
+			_, _ = fmt.Fprint(w, `{"items":[{"metadata":{"name":"cfg","namespace":"prod"},"data":{"k":"v"}}]}`)
 		default:
-			fmt.Fprint(w, `{"items":[]}`)
+			_, _ = fmt.Fprint(w, `{"items":[]}`)
 		}
 	})
 

@@ -42,12 +42,12 @@ const (
 type State string
 
 const (
-	// Live: the chain may be extended, and the next cycle will extend it.
+	// Live means the chain may be extended, and the next cycle will extend it.
 	Live State = "live"
-	// ReBasing: this chain is over — a migration under it, or the slot it read through gone — and
-	// the next cycle takes a new base copy. A marker is already in the store (rebase.go).
+	// ReBasing means this chain is over — a migration under it, or the slot it read through
+	// gone — and the next cycle takes a new base copy. A marker is already in the store (rebase.go).
 	ReBasing State = "rebasing"
-	// Stopped: no further cycle will run in this process.
+	// Stopped means no further cycle will run in this process.
 	Stopped State = "stopped"
 )
 
@@ -55,6 +55,8 @@ const (
 // without parsing an error message. The message stays in Err, where it belongs.
 type Reason string
 
+// The vocabulary. ReasonNone is the ordinary cycle; every other value names what ended or
+// skipped one.
 const (
 	ReasonNone        Reason = ""
 	ReasonNoChanges   Reason = "no-changes"
@@ -152,7 +154,9 @@ func (l Log) Report(_ context.Context, f Fact) {
 		// past one to reach the next line.
 		line += "\n  " + f.Err.Error()
 	}
-	fmt.Fprintln(l.To, line)
+	// The write's own error is dropped: To is a log, and Report has no error to return by
+	// design (a reporter that fails is the check() argument for never depending on one).
+	_, _ = fmt.Fprintln(l.To, line)
 }
 
 // round keeps the achieved interval readable without pretending to a precision the measurement

@@ -1,16 +1,16 @@
-package postgres
-
-// order.go is THE ONE PLACE IN THIS REPO ALLOWED TO LOOK INSIDE A POSITION, and it is this file
-// because it is this package: only Postgres knows that 0/1A2B3C8 follows 0/1A2B000
-// (backup-shape.md §5). Everything above the seam — the pipeline, the manifest, the chain
-// verifier — stores a Position, hands it back and compares it for equality, and asks here when it
-// needs the two ordered. The day a second file parses an LSN, the first MySQL binlog coordinate
-// breaks whatever it is in.
+// Package postgres orders Postgres WAL positions for the chain verifier.
+//
+// It is THE ONE PLACE IN THIS REPO ALLOWED TO LOOK INSIDE A POSITION, and it is this package
+// because only Postgres knows that 0/1A2B3C8 follows 0/1A2B000 (backup-shape.md §5). Everything
+// above the seam — the pipeline, the manifest, the chain verifier — stores a Position, hands it
+// back and compares it for equality, and asks here when it needs the two ordered. The day a
+// second file parses an LSN, the first MySQL binlog coordinate breaks whatever it is in.
 //
 // It answers chain.Ordered, which AD-035 held back until it had a consumer. chain.go is that
 // consumer: a hole between two change files is the difference between one file's end and the next
 // one's start, and telling that difference from an overlap is a question nothing outside this
 // package can answer.
+package postgres
 
 import (
 	"strconv"

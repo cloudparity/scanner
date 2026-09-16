@@ -597,7 +597,7 @@ func TestUnlimitedCeiling(t *testing.T) {
 	for setting, want := range map[string]bool{
 		"-1":     true,
 		"-1MB":   true,
-		" -1 ":   true,
+		" -1 ":   true, //nolint:gocritic // mapKey: the padding is the fixture; the parser must trim it
 		"0":      false,
 		"1GB":    false,
 		"1024MB": false,

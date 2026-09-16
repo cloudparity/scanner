@@ -11,6 +11,7 @@ package postgres
 
 import (
 	"encoding/binary"
+	"math"
 	"testing"
 	"time"
 
@@ -32,7 +33,7 @@ type col struct {
 func begin(commit pglogrepl.LSN) []byte {
 	out := []byte{'B'}
 	out = binary.BigEndian.AppendUint64(out, uint64(commit))
-	out = binary.BigEndian.AppendUint64(out, uint64(pgTime(time.Now())))
+	out = binary.BigEndian.AppendUint64(out, pgTime(time.Now()))
 	return binary.BigEndian.AppendUint32(out, 42)
 }
 
@@ -40,7 +41,7 @@ func commit(at pglogrepl.LSN) []byte {
 	out := []byte{'C', 0}
 	out = binary.BigEndian.AppendUint64(out, uint64(at))
 	out = binary.BigEndian.AppendUint64(out, uint64(at+8)) // the end of the transaction
-	return binary.BigEndian.AppendUint64(out, uint64(pgTime(time.Now())))
+	return binary.BigEndian.AppendUint64(out, pgTime(time.Now()))
 }
 
 func relate(id uint32, schema, table string, columns ...col) []byte {
@@ -49,7 +50,7 @@ func relate(id uint32, schema, table string, columns ...col) []byte {
 	out = appendString(out, schema)
 	out = appendString(out, table)
 	out = append(out, 'd') // relreplident: the default, meaning the primary key
-	out = binary.BigEndian.AppendUint16(out, uint16(len(columns)))
+	out = binary.BigEndian.AppendUint16(out, count16(len(columns)))
 	for _, c := range columns {
 		var flags byte
 		if c.key {
@@ -127,7 +128,7 @@ var (
 )
 
 func appendTuple(out []byte, values ...any) []byte {
-	out = binary.BigEndian.AppendUint16(out, uint16(len(values)))
+	out = binary.BigEndian.AppendUint16(out, count16(len(values)))
 	for _, v := range values {
 		switch value := v.(type) {
 		case nullColumn:
@@ -136,7 +137,7 @@ func appendTuple(out []byte, values ...any) []byte {
 			out = append(out, 'u')
 		case string:
 			out = append(out, 't')
-			out = binary.BigEndian.AppendUint32(out, uint32(len(value)))
+			out = binary.BigEndian.AppendUint32(out, count32(len(value)))
 			out = append(out, value...)
 		default:
 			panic("a tuple column is a string, null or toasted")
@@ -150,9 +151,32 @@ func appendString(out []byte, s string) []byte {
 	return append(out, 0)
 }
 
-// pgTime is the timestamp form pgoutput uses: microseconds since 2000-01-01.
-func pgTime(t time.Time) int64 {
-	return t.Unix()*1000000 + int64(t.Nanosecond())/1000 - 946684800*1000000
+// pgTime is the timestamp form pgoutput uses: microseconds since 2000-01-01, which the wire
+// carries as the eight bytes of an int64. Every t here is time.Now(), so the value is positive and
+// the bytes are the same either way; the check is what lets the conversion be written without a
+// guard nobody could read.
+func pgTime(t time.Time) uint64 {
+	micros := t.Unix()*1000000 + int64(t.Nanosecond())/1000 - 946684800*1000000
+	if micros < 0 {
+		panic("pgTime: a fixture timestamp before 2000-01-01")
+	}
+	return uint64(micros)
+}
+
+// count16 and count32 are the length prefixes pgoutput uses, bounded by the same panic a real
+// server's encoder would never need: a fixture with more than 65535 columns is a broken test.
+func count16(n int) uint16 {
+	if n < 0 || n > math.MaxUint16 {
+		panic("count16: out of range")
+	}
+	return uint16(n)
+}
+
+func count32(n int) uint32 {
+	if n < 0 || n > math.MaxUint32 {
+		panic("count32: out of range")
+	}
+	return uint32(n)
 }
 
 // feed runs a whole message stream through one decoder and returns the transactions that
