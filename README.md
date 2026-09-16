@@ -1,5 +1,13 @@
 # Cloud Parity scanner
 
+[![verify](https://github.com/cloudparity/scanner/actions/workflows/verify.yml/badge.svg?branch=main)](https://github.com/cloudparity/scanner/actions/workflows/verify.yml)
+[![lint](https://github.com/cloudparity/scanner/actions/workflows/lint.yml/badge.svg?branch=main)](https://github.com/cloudparity/scanner/actions/workflows/lint.yml)
+[![govulncheck](https://github.com/cloudparity/scanner/actions/workflows/govulncheck.yml/badge.svg?branch=main)](https://github.com/cloudparity/scanner/actions/workflows/govulncheck.yml)
+[![CodeQL](https://github.com/cloudparity/scanner/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/cloudparity/scanner/actions/workflows/codeql.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/cloudparity/scanner/badge)](https://scorecard.dev/viewer/?uri=github.com/cloudparity/scanner)
+[![Go version](https://img.shields.io/github/go-mod/go-version/cloudparity/scanner)](go.mod)
+[![License](https://img.shields.io/github/license/cloudparity/scanner)](LICENSE)
+
 The scanner is the part of Cloud Parity that runs inside your cloud. It reads the configuration
 of an Azure subscription, or of a Kubernetes cluster from inside it, and writes one JSON document
 called an *estate*: every resource, the references between them, what was redacted, and every
@@ -183,6 +191,14 @@ and neither publishes until the image for the tag is anonymously pullable.
   every pull request and every push to `main`, with no Docker daemon and no cloud credential.
   `main` accepts only pull requests that passed it, administrators included:
   `gh api repos/cloudparity/scanner/branches/main/protection`.
+- The badges at the top of this page are the live status of a workflow on `main`, each linked
+  to its run history, and nothing else: `lint` (`.github/workflows/lint.yml`, golangci-lint with
+  `.golangci.yml`, a finding fails it), `govulncheck` (`.github/workflows/govulncheck.yml`, an
+  advisory whose vulnerable symbol this code reaches fails it) and `CodeQL`
+  (`.github/workflows/codeql.yml`, which fails while any CodeQL alert for the analysed ref is
+  open, not merely when the upload fails). The OpenSSF Scorecard badge is that project's own
+  weekly read of this repository (`.github/workflows/scorecard.yml` publishes it); the Go
+  version and license badges are read from `go.mod` and `LICENSE`.
 
 ## Report a problem
 
