@@ -8,6 +8,18 @@ pull request can change it, only after `verify` has passed on it, and that appli
 administrators as well. You can read the setting yourself:
 `gh api repos/cloudparity/scanner/branches/main/protection`.
 
+Three more workflows run on every pull request and every push to `main`, and their badges sit
+at the top of README.md: `lint` (`.github/workflows/lint.yml`, golangci-lint at the version
+pinned there with `.golangci.yml`), `govulncheck` (`.github/workflows/govulncheck.yml`) and
+`CodeQL` (`.github/workflows/codeql.yml`). Each fails on a finding: the linter on any issue in
+its set, govulncheck on any advisory whose vulnerable symbol this code reaches, and CodeQL on
+any open code-scanning alert for the ref it analysed (a step after the analysis asks the API,
+because the upload itself succeeds whether or not it found anything). A finding is fixed at the
+line, not excluded; a CodeQL alert that is a genuine false positive is dismissed in the Security
+tab with a reason, which is the same rule in that tool's form. Whether `main` also requires
+these three before a merge is part of the branch-protection setting above; read it rather than
+assume.
+
 Before you push, `make hooks` once installs `pre-commit` and `pre-push` hooks that run the same
 checks plus the race detector and a coverage floor of 85% on every collector, so you find out
 locally. Those two are stricter than CI and run only in the hook. `make all` runs `fmt`, `vet`,

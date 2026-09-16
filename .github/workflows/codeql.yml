@@ -1,0 +1,68 @@
+name: codeql
+# GitHub's CodeQL static analysis for Go on every pull request, every push to main, and weekly,
+# because new queries find things in unchanged code. Free for a public repository.
+#
+# The analysis step uploads its results to the Security tab (code scanning) and succeeds
+# whether or not it found anything: on its own it can only say "the scan ran". So a second step
+# asks the code-scanning API for the open alerts on the ref just analysed and fails the job when
+# there are any. That is what lets the badge in README.md mean "no open CodeQL alert on main",
+# and what makes this check worth requiring in branch protection.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '31 6 * * 1'   # weekly, Monday 06:31 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    # The status check is named after the job: `CodeQL` is what branch protection requires.
+    name: CodeQL
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write   # upload the results to code scanning, and read the alerts back
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          # The same toolchain the build uses, so the analysis sees the code the binary contains.
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - uses: github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        with:
+          languages: go
+          build-mode: autobuild
+          queries: security-and-quality
+
+      - uses: github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        with:
+          category: /language:go
+          # Return only once code scanning has processed the upload, so the step below reads
+          # this analysis and not the previous one.
+          wait-for-processing: true
+
+      - name: fail on open alerts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Open alerts for this ref: refs/pull/N/merge on a pull request, refs/heads/main
+          # otherwise. Fixed and dismissed alerts are not open, so a genuine false positive is
+          # dismissed in the Security tab with a reason - the at-the-line rule in CodeQL's form.
+          alerts=$(gh api --paginate -X GET "repos/${GITHUB_REPOSITORY}/code-scanning/alerts" \
+            -f tool_name=CodeQL -f state=open -f ref="${GITHUB_REF}" -f per_page=100 \
+            --jq '.[] | "\(.rule.id)\t\(.most_recent_instance.location.path):\(.most_recent_instance.location.start_line)\t\(.html_url)"')
+          if [ -n "${alerts}" ]; then
+            n=$(printf '%s\n' "${alerts}" | wc -l | tr -d ' ')
+            echo "open CodeQL alerts on ${GITHUB_REF}:"
+            printf '%s\n' "${alerts}"
+            echo "::error::${n} open CodeQL alert(s) on ${GITHUB_REF}: fix at the line, or dismiss with a reason in the Security tab"
+            exit 1
+          fi
+          echo "no open CodeQL alerts on ${GITHUB_REF}"

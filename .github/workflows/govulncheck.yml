@@ -1,0 +1,44 @@
+name: govulncheck
+# Runs govulncheck against the module: every advisory in the Go vulnerability database that
+# names a symbol this code actually calls fails the job. The scan uses the Go version go.mod
+# selects - the same one verify.yml, image.yml and release.yml build with - so a standard
+# library advisory reported here is one the published binary carries, not one the newest
+# toolchain would have fixed. Weekly as well as on every change, because the database moves
+# when the code does not.
+#
+# govulncheck is installed directly, at a pinned version, rather than through
+# golang/govulncheck-action: that action runs `go install ...@latest`, and x/vuln v1.8.0
+# raised its floor to Go 1.26, so under the Go 1.25 toolchain go.mod selects the action fails
+# before it scans anything. A job that cannot start is not a scan, and its red badge would say
+# nothing about the code. Bump the version here when go.mod moves to 1.26.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '23 6 * * 1'   # weekly, Monday 06:23 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    # The status check is named after the job: `govulncheck` is what branch protection requires.
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: install govulncheck
+        # v1.7.0 is the last x/vuln that builds on Go 1.25 (v1.8.0 requires 1.26). The
+        # vulnerability database is fetched live from vuln.go.dev regardless of this version.
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+
+      - name: govulncheck
+        run: govulncheck ./...

@@ -1,10 +1,19 @@
+# Weekly dependency updates for the Go module and for every action the workflows pin.
+# Minor and patch bumps arrive as one pull request per ecosystem; a major bump keeps its own,
+# because it is the one that can change behaviour and deserves its own review.
 version: 2
 updates:
   - package-ecosystem: gomod
     directory: /
     schedule:
       interval: weekly
+    groups:
+      go-minor-and-patch:
+        update-types: [minor, patch]
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    groups:
+      actions-minor-and-patch:
+        update-types: [minor, patch]
