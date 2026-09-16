@@ -1,0 +1,33 @@
+name: lint
+# golangci-lint with the repository's own .golangci.yml, at a pinned version, so the badge in
+# README.md reports exactly the linter `make lint` runs. A finding fails the job; it is fixed
+# at the line (see .golangci.yml), never excluded here. The build tags the config sets
+# (run.build-tags) are what put the docker and testbed test files in scope, so no flags are
+# passed: the local run and this one are the same command.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    # The status check is named after the job: `lint` is what branch protection requires.
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          # The lint action keeps its own cache of the module and build directories.
+          cache: false
+
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          # Pinned: .golangci.yml is a v2 configuration and a different linter version is a
+          # different set of findings. Bump it here and locally together.
+          version: v2.13.2
