@@ -1,9 +1,10 @@
 name: release
 # On a v* tag: cross-compile the scanner for five platforms, write SHA256SUMS, attest each of
 # the six files on its own, and publish a GitHub Release with the binaries, the checksums and
-# one Sigstore bundle per file attached. The release body says how to verify a download, names
-# the container image digest for the same tag (published by image.yml), and links the
-# permissions the scanner asks for.
+# one Sigstore bundle per file attached. The release body lists what changed since the previous
+# tag (every merged PR, grouped by scope and linked), says how to verify a download, names the
+# container image digest for the same tag (published by image.yml), and links the permissions
+# the scanner asks for.
 #
 # A tag can point at any commit and never triggers verify, so the build job runs `go test ./...`
 # on the tagged commit itself before it builds anything. The release job refuses to publish
@@ -248,6 +249,73 @@ jobs:
           echo "::error::$IMAGE:$GITHUB_REF_NAME has no provenance attestation from this repository: check the attest job of the image workflow run for this tag, then re-run this workflow"
           exit 1
 
+      # What changed, for whoever reads the Releases page: the title of every pull request
+      # merged between the previous v* tag and this one, grouped by the subject's scope prefix
+      # (deps:, docs:, release:, ...) and linked to its PR. main takes squash merges only, so
+      # each merged PR is one commit whose subject ends in "(#N)"; a subject without one (the
+      # root commit) is listed unlinked. A Conventional Commits group after the type is
+      # accepted too, and Dependabot's "build(deps): bump ..." / "build(deps-dev): ..." land
+      # under Dependencies with the rest of deps:. The previous tag is the highest v* tag below
+      # this one in version order; the first tag has none and lists everything back to the root
+      # commit.
+      # Read from the API, not a checkout, because this job has no checkout. The same step run
+      # locally with GH_REPO and GITHUB_REF_NAME set reproduces the section for any tag.
+      - name: changes since the previous tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          gh api "repos/$GH_REPO/git/matching-refs/tags/v" --paginate \
+            --jq '.[].ref | ltrimstr("refs/tags/") | select(test("^v[0-9]"))' > tags
+          echo "$tag" >> tags
+          prev="$(sort -uV tags | awk -v tag="$tag" '$0 == tag { print last; exit } { last = $0 }')"
+          if [ -n "$prev" ]; then
+            gh api "repos/$GH_REPO/compare/$prev...$tag?per_page=250" --paginate \
+              --jq '.commits[].commit.message | split("\n")[0]' > subjects
+            intro="Every pull request merged between \`$prev\` and \`$tag\` ([compare](https://github.com/$GH_REPO/compare/$prev...$tag))."
+          else
+            gh api "repos/$GH_REPO/commits?sha=$tag&per_page=100" --paginate \
+              --jq '.[].commit.message | split("\n")[0]' \
+              | awk '{ line[NR] = $0 } END { for (i = NR; i > 0; i--) print line[i] }' > subjects
+            intro="The first release: everything merged since the repository's first commit."
+          fi
+          {
+            echo "## What changed"
+            echo
+            echo "$intro"
+            echo
+            awk -v repo="$GH_REPO" '
+              BEGIN {
+                split("scanner deploy release build deps ci lint fuzz docs", known, " ")
+                for (i in known) rank[known[i]] = i + 0
+                title["scanner"] = "Scanner"; title["deploy"] = "Deployment"; title["release"] = "Releases"
+                title["build"] = "Build"; title["deps"] = "Dependencies"; title["ci"] = "CI"
+                title["lint"] = "Linting"; title["fuzz"] = "Fuzzing"; title["docs"] = "Documentation"
+              }
+              {
+                line = $0; pr = ""; scope = "other"
+                if (match(line, / \(#[0-9]+\)$/)) { pr = substr(line, RSTART + 3, RLENGTH - 4); line = substr(line, 1, RSTART - 1) }
+                if (match(line, /^[a-z][a-z0-9-]*(\([a-z0-9-]+\))?: /)) {
+                  prefix = substr(line, 1, RLENGTH - 2); line = substr(line, RLENGTH + 1); group = ""
+                  if (match(prefix, /\(.*\)$/)) { group = substr(prefix, RSTART + 1, RLENGTH - 2); prefix = substr(prefix, 1, RSTART - 1) }
+                  scope = (group == "deps" || group == "deps-dev") ? "deps" : prefix
+                }
+                line = toupper(substr(line, 1, 1)) substr(line, 2)
+                if (pr != "") line = line " ([#" pr "](https://github.com/" repo "/pull/" pr "))"
+                if (!(scope in items)) { seen[++n] = scope; if (!(scope in rank)) rank[scope] = 100 + n }
+                items[scope] = items[scope] "- " line "\n"
+              }
+              END {
+                if (n == 1 && seen[1] == "other") { printf "%s\n", items["other"]; exit }
+                for (r = 1; r <= 100 + n; r++) for (i = 1; i <= n; i++) if (rank[seen[i]] == r) {
+                  s = seen[i]; h = (s in title) ? title[s] : (s == "other" ? "Other" : toupper(substr(s, 1, 1)) substr(s, 2))
+                  printf "### %s\n\n%s\n", h, items[s]
+                }
+              }
+            ' subjects
+          } > changes.md
+          cat changes.md
+
       - name: release notes
         env:
           DIGEST: ${{ steps.image.outputs.digest }}
@@ -255,6 +323,9 @@ jobs:
         run: |
           tag="$GITHUB_REF_NAME"
           {
+            cat changes.md
+            echo "## Build"
+            echo
             echo "Built from commit \`$GITHUB_SHA\` with $GO:"
             echo '`CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" ./agent/cmd/scanner`.'
             echo
