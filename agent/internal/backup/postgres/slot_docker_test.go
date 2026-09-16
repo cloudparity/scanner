@@ -179,7 +179,7 @@ func startPostgresIn(t *testing.T, runFlags []string, image string, settings ...
 	t.Cleanup(func() {
 		stop, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
-		if out, err := exec.CommandContext(stop, "docker", "rm", "-f", "-v", id).CombinedOutput(); err != nil {
+		if out, err := exec.CommandContext(stop, "docker", "rm", "-f", "-v", id).CombinedOutput(); err != nil { //gosec:disable G204 -- removing the container this test started
 			t.Errorf("could not remove container %s — remove it by hand: %v: %s", id, err, out)
 		}
 	})
@@ -188,7 +188,7 @@ func startPostgresIn(t *testing.T, runFlags []string, image string, settings ...
 	// server during initdb with listen_addresses empty; that server answers on the socket, so a
 	// socket probe can go green before anything is listening on the port the test then dials.
 	for deadline := time.Now().Add(2 * time.Minute); ; {
-		if err := exec.CommandContext(ctx, "docker", "exec", id, "pg_isready", "-h", "127.0.0.1", "-U", "postgres").Run(); err == nil {
+		if err := exec.CommandContext(ctx, "docker", "exec", id, "pg_isready", "-h", "127.0.0.1", "-U", "postgres").Run(); err == nil { //gosec:disable G204 -- a throwaway container this test started
 			break
 		}
 		if time.Now().After(deadline) {
@@ -283,7 +283,7 @@ func queryRow(ctx context.Context, t *testing.T, conn *pgconn.PgConn, sql string
 // environment below, and into psql over stdin — and the redaction is the backstop, not the fix.
 func docker(ctx context.Context, t *testing.T, args ...string) string {
 	t.Helper()
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd := exec.CommandContext(ctx, "docker", args...) //gosec:disable G204 -- the docker CLI with arguments the test wrote
 	cmd.Env = append(os.Environ(), "POSTGRES_PASSWORD="+containerPassword)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -301,7 +301,7 @@ func docker(ctx context.Context, t *testing.T, args ...string) string {
 // with something misleading. Measured on 18-alpine: no flag → exit 0, with the flag → exit 3.
 func psql(ctx context.Context, t *testing.T, id, sql string) {
 	t.Helper()
-	cmd := exec.CommandContext(ctx, "docker", "exec", "-i", id,
+	cmd := exec.CommandContext(ctx, "docker", "exec", "-i", id, //gosec:disable G204 -- a throwaway container this test started
 		"psql", "-U", "postgres", "-v", "ON_ERROR_STOP=1")
 	cmd.Stdin = strings.NewReader(sql)
 	if out, err := cmd.CombinedOutput(); err != nil {

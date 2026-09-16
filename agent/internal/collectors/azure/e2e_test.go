@@ -64,7 +64,7 @@ type tableGraph struct {
 	seen      int
 }
 
-func (g *tableGraph) Resources(ctx context.Context, q armresourcegraph.QueryRequest, o *armresourcegraph.ClientResourcesOptions) (armresourcegraph.ClientResourcesResponse, error) {
+func (g *tableGraph) Resources(_ context.Context, q armresourcegraph.QueryRequest, _ *armresourcegraph.ClientResourcesOptions) (armresourcegraph.ClientResourcesResponse, error) {
 	if q.Query == nil || !strings.HasPrefix(*q.Query, "resources") {
 		return armresourcegraph.ClientResourcesResponse{QueryResponse: armresourcegraph.QueryResponse{
 			Data: []any{}, TotalRecords: i64(0),

@@ -164,14 +164,14 @@ func TestEstateGolden(t *testing.T) {
 
 	path := filepath.Join("testdata", "estate.golden.json")
 	if *update {
-		if err := os.WriteFile(path, got, 0o644); err != nil {
+		if err := os.WriteFile(path, got, 0o600); err != nil {
 			t.Fatalf("write golden: %v", err)
 		}
 		t.Logf("updated %s", path)
 		return
 	}
 
-	want, err := os.ReadFile(path)
+	want, err := os.ReadFile(path) //gosec:disable G304 -- a golden file under testdata/
 	if err != nil {
 		t.Fatalf("read golden (run with -update to create): %v", err)
 	}

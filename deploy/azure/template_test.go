@@ -27,9 +27,9 @@ func compile(t *testing.T, file string) map[string]any {
 	var cmd *exec.Cmd
 	switch {
 	case exec.Command("bicep", "--version").Run() == nil:
-		cmd = exec.Command("bicep", "build", file, "--stdout")
+		cmd = exec.Command("bicep", "build", file, "--stdout") //gosec:disable G204 -- file is a template path this test chose
 	case exec.Command("az", "bicep", "version").Run() == nil:
-		cmd = exec.Command("az", "bicep", "build", "--file", file, "--stdout")
+		cmd = exec.Command("az", "bicep", "build", "--file", file, "--stdout") //gosec:disable G204 -- file is a template path this test chose
 	default:
 		t.Skip("no bicep compiler on PATH (bicep, or az with the bicep extension)")
 	}
@@ -115,7 +115,7 @@ func TestJobReceivesApiUrlAndKeyFromEnvironment(t *testing.T) {
 	arm := compile(t, "scanner-resources.bicep")
 	job := resource(t, arm, "Microsoft.App/jobs")
 
-	must := map[string]string{
+	must := map[string]string{ //gosec:disable G101 -- ARM expressions naming where the key comes from, not a key
 		"the url env var":                `'name', 'PARITY_API_URL', 'value', parameters('parityApiUrl')`,
 		"the key env var by secretRef":   `'name', 'PARITY_API_KEY', 'secretRef', 'parity-api-key'`,
 		"the secret from the vault":      `'name', 'parity-api-key', 'keyVaultUrl', parameters('parityApiKeySecretUri')`,

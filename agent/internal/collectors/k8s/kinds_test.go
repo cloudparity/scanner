@@ -17,7 +17,7 @@ import (
 // substring check catches the drift that actually happens.
 func TestReaderManifestCoversEveryKind(t *testing.T) {
 	path := filepath.Join("..", "..", "..", "..", "deploy", "kubernetes", "reader.yaml")
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path) //gosec:disable G304 -- a path this test built to a file in the repository
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}

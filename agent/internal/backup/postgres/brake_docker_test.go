@@ -193,7 +193,7 @@ func TestBrakeTerminatesItsOwnWedgedStreamAndDrops(t *testing.T) {
 		Slot:      "vp_stream",
 		Query:     simpleQueryRows(watcher),
 		Disk:      tightDisk,
-		StreamPID: func() uint32 { return uint32(stream.PID()) },
+		StreamPID: func() uint32 { return stream.PID() },
 		Alert:     func(a Alarm) { alarms = append(alarms, a) },
 	}
 
@@ -203,7 +203,7 @@ func TestBrakeTerminatesItsOwnWedgedStreamAndDrops(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	if held.ActivePID != uint32(stream.PID()) {
+	if held.ActivePID != stream.PID() {
 		t.Fatalf("active_pid = %d, want our stream's backend %d", held.ActivePID, stream.PID())
 	}
 
@@ -417,7 +417,7 @@ func startPostgresOnASmallDisk(t *testing.T, image string) string {
 // brake's single number, taken from the only place a test can take it — on Azure it comes from
 // Monitor, because nothing over port 5432 can answer it (see Disk).
 func dfOf(ctx context.Context, id, mount string) (Space, error) {
-	out, err := exec.CommandContext(ctx, "docker", "exec", id, "df", "-k", mount).CombinedOutput()
+	out, err := exec.CommandContext(ctx, "docker", "exec", id, "df", "-k", mount).CombinedOutput() //gosec:disable G204 -- a throwaway container this test started
 	if err != nil {
 		return Space{}, fmt.Errorf("df -k %s in %s: %v: %s", mount, id, err, out)
 	}
@@ -444,7 +444,7 @@ func dfOf(ctx context.Context, id, mount string) (Space, error) {
 // insert8MiB writes about eight mebibytes, and returns the server's error rather than failing the
 // test: running out of space is a RESULT here, not an accident.
 func insert8MiB(ctx context.Context, id string) error {
-	cmd := exec.CommandContext(ctx, "docker", "exec", "-i", id,
+	cmd := exec.CommandContext(ctx, "docker", "exec", "-i", id, //gosec:disable G204 -- a throwaway container this test started
 		"psql", "-U", "postgres", "-v", "ON_ERROR_STOP=1")
 	cmd.Stdin = strings.NewReader(
 		"INSERT INTO filler SELECT repeat('x', 1000) FROM generate_series(1, 8000)")

@@ -244,7 +244,7 @@ func psqlRefused(ctx context.Context, t *testing.T, id, sql string) string {
 // test on any error, which is right everywhere else.
 func psqlOutput(ctx context.Context, t *testing.T, id, sql string) string {
 	t.Helper()
-	cmd := exec.CommandContext(ctx, "docker", "exec", "-i", id,
+	cmd := exec.CommandContext(ctx, "docker", "exec", "-i", id, //gosec:disable G204 -- a throwaway container this test started
 		"psql", "-U", "postgres", "-v", "ON_ERROR_STOP=1", "-tAq")
 	cmd.Stdin = strings.NewReader(sql)
 	out, err := cmd.CombinedOutput()
