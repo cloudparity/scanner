@@ -15,13 +15,14 @@ that is safe to run on production.
 
 You cannot rebuild what you cannot see. A recovery plan built from a dashboard is a guess: the
 dashboard shows each resource on its own, and the outage takes them together. The scanner gives
-you your whole subscription as one document, an *estate*: every resource, every reference
+you your whole subscription as one document, an *estate*: every resource, the references
 between them, what was redacted, and every place it could not look. From it the Cloud Parity
 console gives you back a recovery plan, the order it rebuilds in, and a coverage verdict that
-names what cannot be put back. The promise is short: metadata only; `scan` and `scan-cluster`
-write nothing to your cloud; one built-in role; and you can read the code that keeps it, because
-you are looking at it. The one subcommand that does write, `backup`, is a separate PostgreSQL
-pipeline that cannot run unless you configure it: [docs/cli.md](docs/cli.md#backup-and-prune-the-one-thing-that-writes).
+names what cannot be put back. It reads. It does not restore. The promise is short: metadata
+only; `scan` and `scan-cluster` write nothing to your cloud; one built-in role; and you can read
+the code that keeps it, because you are looking at it. The subcommands that do write, `backup`
+and `prune`, are a separate PostgreSQL backup pipeline that cannot run unless you configure it,
+and `prune` is a dry run unless you pass `--apply`: [docs/cli.md](docs/cli.md#backup-and-prune-the-one-thing-that-writes).
 
 ## See your recovery plan in three steps
 
