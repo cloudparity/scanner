@@ -66,18 +66,17 @@ param image string = 'ghcr.io/cloudparity/scanner:latest'
 // equal; bump both together.
 var defaultImage = 'ghcr.io/cloudparity/scanner:latest'
 
-// Whether the default image can upload. Every tag published so far - v1 to v8 - was built
-// before the upload code landed on main (8c30031, 2026-08-16). Those binaries read neither
-// PARITY_API_URL nor PARITY_API_KEY: given both, the job prints the estate to a stdout nobody
-// keeps, exits 0 and delivers nothing, and the customer sees a successful execution and an
-// empty console. So while this is false the template refuses parityApiUrl with the default
-// image (below) rather than deploying that job.
+// Whether the default image can upload. The default is ghcr.io/cloudparity/scanner, published by
+// .github/workflows/image.yml from this repository's main, and that workflow's smoke step refuses
+// to push any image whose `scan -h` does not list -api-url. So the default reads PARITY_API_URL
+// and PARITY_API_KEY and delivers the estate to the console.
 //
-// To lift it: point defaultImage and the parameter default at a tag this repository published,
-// and set this to true. Every image .github/workflows/image.yml publishes is checked before push
-// to list -api-url in `scan -h` (its smoke step), so any tag from here can upload; this flag
-// says whether the DEFAULT is one of them.
-var defaultImageUploads = false
+// Keep this true only while defaultImage points at an image this repository published. A foreign
+// image carries no such promise: an older binary given both variables prints the estate to a
+// stdout nobody keeps, exits 0, and the customer sees a successful execution and an empty console.
+// While this is false the template refuses parityApiUrl with the default image rather than deploy
+// that job. verify.yml's install-template job pulls the default and checks it agrees with this line.
+var defaultImageUploads = true
 
 @description('Only for customers mirroring the image into their own private registry. Leave empty to pull the public image anonymously.')
 param registryServer string = ''
