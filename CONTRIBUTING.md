@@ -33,6 +33,35 @@ pushing a `v*` tag publishes the same image under that tag and a GitHub Release 
 publish before they build anything, so a tag on a commit that never went through `verify` still
 cannot publish a failing build.
 
+## Fuzzing
+
+The parsers that read what a cloud returned - the ARM resource-id parser and the reference
+recogniser in `agent/internal/collectors/azure/`, the redaction and screening walks over a
+Resource Graph document, the hostname tokenizer, the Kubernetes object translation in
+`agent/internal/collectors/k8s/`, and the `contract.Estate` JSON round trip - each have a
+native Go fuzz target (`func FuzzXxx(f *testing.F)`) beside their unit tests. The unit tests
+pin what a parser says about well-formed input; the fuzz targets pin what it must never do on
+any input: panic, produce an id that fails its own normalization, record a redaction that did
+not happen, mutate the row it was handed, or give a different answer to the same bytes twice.
+
+`go test ./...` runs every target over its seed corpus and every crasher ever found, so they
+are part of `verify` like any other test. The search for new crashers is a time budget rather
+than a fixed set of cases, so it runs separately: `make fuzz` runs every target for 30 seconds
+(`make fuzz FUZZTIME=2m` for longer), and `fuzz` (`.github/workflows/fuzz.yml`) runs each one
+for 60 seconds weekly and on demand. To run one target for longer:
+
+```sh
+go test -run='^$' -fuzz=FuzzParseARMID -fuzztime=5m ./agent/internal/collectors/azure/
+```
+
+A failing input is written to the package's `testdata/fuzz/<FuzzName>/` and is a plain test
+case from then on. Commit it, with a name that says what it found, together with the fix -
+never delete it or loosen the invariant to make the run green. A fuzzer finding a panic in a
+parser that reads a customer's cloud is a real finding, and the entries already there record
+the ones it has made. When you add a parser that takes untrusted bytes or strings, add a
+target with it; seed it from the unit tests' cases and assert the invariants that matter,
+not the outputs.
+
 ## Rules the tests enforce
 
 - **Go 1.26 or newer.** `go.mod` is the source of truth; CI reads it.

@@ -42,8 +42,12 @@ func TestHostOfExtractsTheHostname(t *testing.T) {
 		"tcp://sql1.database.windows.net,1433":                           "sql1.database.windows.net",
 		"cloudparitysa.privatelink.blob.core.windows.net":                "cloudparitysa.blob.core.windows.net",
 		"https://cloudparitysa.privatelink.blob.core.windows.net/config": "cloudparitysa.blob.core.windows.net",
-		"":                                       "",
-		"not a host":                             "",
+		"":           "",
+		"not a host": "",
+		// Found by FuzzHostsIn: both pass the grammar as written and fail it once privatelink is
+		// dropped, so the index would hold a key no reference could ever tokenize to.
+		"a.privatelink.com":                      "",
+		"a.b.c1.privatelink":                     "",
 		"/subscriptions/sub-1/resourcegroups/rg": "",
 		"10.10.2.4":                              "",
 		"localhost":                              "",
@@ -149,6 +153,32 @@ func TestEndpointIndexTrustsPrivateEndpointNICPairs(t *testing.T) {
 	index := endpointIndex([]contract.Resource{nic})
 	if got := index["cloud-parity-vault.vault.azure.net"]; got != epVault {
 		t.Errorf("NIC pair not indexed: got %q, want %q", got, epVault)
+	}
+}
+
+// Found by FuzzTranslateRow. The pair is trusted because the cloud stated it, but the id half
+// still has to BE an id: taken verbatim, a privateLinkServiceId that is not an ARM id became a
+// Dependency.To, which the contract defines as a normalized id, so one malformed NIC put an
+// edge in the estate that no resource could ever match. Same recogniser as every other string.
+func TestEndpointIndexRejectsAPrivateLinkPairWhoseIDIsNotAnID(t *testing.T) {
+	for name, target := range map[string]string{
+		"not an id":            "1",
+		"a URL":                "https://cloud-parity-vault.vault.azure.net/",
+		"an id with a query":   epVault + "?api-version=2023-02-01",
+		"a namespace, no pair": linkRG + "/providers/microsoft.keyvault",
+		"empty":                "",
+	} {
+		t.Run(name, func(t *testing.T) {
+			nic := resourceNamed(epNIC, "nic", map[string]any{
+				"privateLinkConnectionProperties": map[string]any{
+					"fqdns":                []any{"cloud-parity-vault.vault.azure.net"},
+					"privateLinkServiceId": target,
+				},
+			})
+			if index := endpointIndex([]contract.Resource{nic}); len(index) != 0 {
+				t.Errorf("indexed %v from a privateLinkServiceId of %q", index, target)
+			}
+		})
 	}
 }
 

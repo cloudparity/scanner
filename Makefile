@@ -1,5 +1,5 @@
 # scanner — dev tasks. Run from repo root (single Go module).
-.PHONY: all hooks fmt vet lint test test-race test-docker test-e2e cover build run tidy
+.PHONY: all hooks fmt vet lint test test-race test-docker test-e2e fuzz cover build run tidy
 all: fmt vet lint test build
 
 hooks:
@@ -45,6 +45,22 @@ test-docker:
 # The pipeline suite: canned Resource Graph pages -> real Collect -> Estate.
 test-e2e:
 	go test ./agent/internal/collectors/azure/ -run '^TestE2E' -v
+
+# Every native fuzz target (func FuzzXxx in a _test.go), each for FUZZTIME. `go test -fuzz`
+# runs exactly one target per invocation, so this discovers them and loops; the same discovery
+# drives .github/workflows/fuzz.yml, which runs them weekly. A crasher is written under the
+# package's testdata/fuzz/<Fuzzer>/ and is a regression test from then on: commit it with the
+# fix, never delete it to make the run green. One target, longer:
+#   go test -run='^$' -fuzz=FuzzParseARMID -fuzztime=5m ./agent/internal/collectors/azure/
+FUZZTIME ?= 30s
+fuzz:
+	@set -e; go test -list '^Fuzz' ./... | awk ' \
+	    /^Fuzz/ { names[n++] = $$1 } \
+	    /^ok / { for (i = 0; i < n; i++) printf "%s %s\n", $$2, names[i]; n = 0 }' \
+	| while read -r pkg fuzzer; do \
+	    echo "== $$fuzzer ($$pkg) for $(FUZZTIME)"; \
+	    go test -run='^$$' -fuzz="^$$fuzzer\$$" -fuzztime=$(FUZZTIME) "$$pkg"; \
+	done
 
 cover:
 	go test ./agent/internal/collectors/azure/ -coverprofile=/tmp/scanner-cover.out
