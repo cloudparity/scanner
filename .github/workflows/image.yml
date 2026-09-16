@@ -11,6 +11,12 @@ name: image
 #
 # linux/amd64 only: Container Apps runs x86-64. The Dockerfile cross-compiles from the runner's
 # native toolchain (--platform=$BUILDPLATFORM), so nothing here is emulated.
+#
+# On a tag, a second job attests the pushed image: a SLSA build-provenance statement over the
+# image digest, signed with a Sigstore certificate obtained through OIDC, stored in this
+# repository's attestations API and pushed to ghcr.io beside the image. release.yml will not
+# publish a release until that attestation verifies. A customer checks it with
+# `gh attestation verify oci://ghcr.io/cloudparity/scanner:<tag> --owner cloudparity`.
 on:
   push:
     branches: [main]
@@ -30,6 +36,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -83,7 +91,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
 
+      # The digest is what the attest job below signs and what release.yml names, so a push
+      # that leaves the daemon without one is a failure, not an "unknown" in the summary.
       - name: push
+        id: push
         env:
           TAGS: ${{ steps.tags.outputs.tags }}
         run: |
@@ -91,11 +102,16 @@ jobs:
             docker tag "$IMAGE:build" "$t"
             docker push "$t"
           done
-          digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE:build" 2>/dev/null | sed 's/.*@//')"
+          digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE:build" | sed 's/.*@//')"
+          case "$digest" in
+            sha256:*) ;;
+            *) echo "::error::no registry digest recorded for the pushed image (got '$digest')"; exit 1 ;;
+          esac
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
           {
             echo "### Published"
             for t in $TAGS; do echo "- \`$t\`"; done
-            echo "- digest \`${digest:-unknown}\`"
+            echo "- digest \`$digest\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
       # The install template pulls this image anonymously: no registry credential is granted to
@@ -144,3 +160,39 @@ jobs:
           format: spdx-json
           artifact-name: sbom.spdx.json
           upload-release-assets: false
+
+  # Tags only: the provenance a release points at. A job of its own so the OIDC and
+  # attestation grants exist only here, for the few seconds this takes, and never in the job
+  # that runs the build. subject-name carries no tag on purpose; the digest is the identity.
+  # push-to-registry stores a copy of the attestation in ghcr.io as a referrer of the image, so
+  # it travels with a mirror; that push is what packages: write is for. No storage record: it
+  # is an inventory feature needing a further permission, and adds nothing to verification.
+  attest:
+    if: github.ref_type == 'tag'
+    needs: image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write        # push the attestation to ghcr.io beside the image
+      id-token: write        # mint the OIDC token that Sigstore exchanges for a signing certificate
+      attestations: write    # store the signed provenance in this repository's attestations API
+    steps:
+      - name: docker login ghcr.io
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+
+      - name: attest
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ needs.image.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+
+      # The README's command narrowed to this repository, run once here, so a tag whose image
+      # does not verify is visible on this run and not only on a customer's desk.
+      - name: verify
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh attestation verify "oci://$IMAGE:$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY"

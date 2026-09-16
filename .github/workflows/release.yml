@@ -1,13 +1,19 @@
 name: release
-# On a v* tag: cross-compile the scanner for five platforms, write SHA256SUMS, and publish a
-# GitHub Release with the binaries attached. The release body says how to verify a download,
-# names the container image digest for the same tag (published by image.yml), and links the
-# permissions the scanner asks for.
+# On a v* tag: cross-compile the scanner for five platforms, write SHA256SUMS, attest the lot,
+# and publish a GitHub Release with the binaries attached. The release body says how to verify
+# a download, names the container image digest for the same tag (published by image.yml), and
+# links the permissions the scanner asks for.
 #
 # A tag can point at any commit and never triggers verify, so this job runs `go test ./...` on
 # the tagged commit itself before it builds anything. It also refuses to publish until the
-# image for the same tag is anonymously pullable: a release must never name an image a
-# customer cannot pull.
+# image for the same tag is anonymously pullable and carries a provenance attestation of its
+# own: a release must never name an image a customer cannot pull or cannot verify.
+#
+# Provenance is a GitHub artifact attestation: a SLSA build-provenance statement over every
+# file in dist/, signed with a Sigstore certificate that the workflow obtains through OIDC
+# (id-token: write) and stored in this repository's attestations API (attestations: write).
+# No signing key exists to leak or rotate. A customer verifies a download with
+# `gh attestation verify <file> --owner cloudparity`; README.md, "Verify a release".
 on:
   push:
     tags: ['v*']
@@ -22,7 +28,9 @@ jobs:
   release:
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # create the release and upload its assets; this job only
+      contents: write        # create the release and upload its assets; this job only
+      id-token: write        # mint the OIDC token that Sigstore exchanges for a signing certificate
+      attestations: write    # store the signed provenance in this repository's attestations API
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -49,6 +57,35 @@ jobs:
             echo "built $out"
           done
           (cd dist && sha256sum scanner_* > SHA256SUMS && cat SHA256SUMS)
+
+      # One SLSA provenance statement whose subjects are the five binaries and SHA256SUMS,
+      # signed by this workflow run at this commit. The bundle it writes is attached to the
+      # release below as scanner_<tag>.sigstore.json, so the attestation can also be verified
+      # from the attached copy (`gh attestation verify --bundle`) and survives with a mirror.
+      - name: attest
+        id: attest
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*
+
+      # The README's verification command, run on what was just built and narrowed to this
+      # repository (--owner accepts the whole organisation; the job token is certain to see its
+      # own repository's attestations). A release whose binaries do not verify is not published.
+      - name: verify the binaries
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          for f in dist/*; do
+            ok=0
+            for _ in 1 2 3; do
+              gh attestation verify "$f" --repo "$GITHUB_REPOSITORY" && { ok=1; break; }
+              echo "retrying: the attestation for $f is not yet served by the API"
+              sleep 10
+            done
+            [ "$ok" = 1 ] || { echo "::error::$f does not verify against this repository's attestations"; exit 1; }
+          done
+          cp "$BUNDLE" "dist/scanner_${GITHUB_REF_NAME}.sigstore.json"
 
       # The image workflow runs on the same tag push, in parallel. Wait for it to publish
       # :<tag>, asking ghcr.io anonymously - with no credential, exactly as the install template
@@ -82,6 +119,24 @@ jobs:
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
           echo "digest: $digest"
 
+      # image.yml attests the image in a job that runs after its push, so the attestation can
+      # land a little after the tag becomes pullable: allow it five minutes. The check is the
+      # README's own command narrowed to this repository, so what the release notes promise has
+      # been run at least once before they are published.
+      - name: verify the image
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for _ in $(seq 1 15); do
+            if gh attestation verify "oci://$IMAGE:$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY"; then
+              exit 0
+            fi
+            echo "waiting for the provenance attestation of $IMAGE:$GITHUB_REF_NAME"
+            sleep 20
+          done
+          echo "::error::$IMAGE:$GITHUB_REF_NAME has no provenance attestation from this repository: check the attest job of the image workflow run for this tag, then re-run this workflow"
+          exit 1
+
       - name: release notes
         env:
           DIGEST: ${{ steps.image.outputs.digest }}
@@ -99,13 +154,25 @@ jobs:
             echo "sha256sum -c SHA256SUMS --ignore-missing      # macOS: shasum -a 256 -c SHA256SUMS --ignore-missing"
             echo '```'
             echo
+            echo "Every attached file carries a signed build-provenance attestation. To prove a binary was built"
+            echo "by this repository's release workflow at commit \`$GITHUB_SHA\` (needs the GitHub CLI, 2.49 or later):"
+            echo
+            echo '```sh'
+            echo "gh attestation verify scanner_${tag}_linux_amd64 --owner cloudparity"
+            echo '```'
+            echo
+            echo "\`scanner_${tag}.sigstore.json\` is the same attestation as a Sigstore bundle: add"
+            echo "\`--bundle scanner_${tag}.sigstore.json\` to verify against the attached copy instead of the API's."
+            echo
             echo "## Container image"
             echo
             echo '```sh'
             echo "docker pull $IMAGE:$tag"
+            echo "gh attestation verify oci://$IMAGE:$tag --owner cloudparity"
             echo '```'
             echo
             echo "Digest: \`$IMAGE@$DIGEST\`. Pin it in \`deploy/azure/scanner.bicep\` (\`image=\`) or a mirror."
+            echo "The image's provenance attestation is also pushed to ghcr.io next to the image."
             echo
             echo "## Permissions"
             echo
