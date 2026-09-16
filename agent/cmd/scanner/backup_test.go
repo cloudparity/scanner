@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -19,7 +20,7 @@ import (
 // thing away and see it named.
 func complete() backupConfig {
 	return backupConfig{
-		pg: postgres.Config{
+		pg: postgres.Config{ //gosec:disable G101 -- a fixture that says so in its own value
 			Host:     "pg.postgres.database.azure.com",
 			Database: "orders",
 			User:     "parity_stream",
@@ -132,7 +133,7 @@ func TestAPortThatDoesNotFitIsRefusedRatherThanNarrowed(t *testing.T) {
 		cfg := complete()
 		cfg.port = port
 		if err := cfg.refuse(); err == nil {
-			t.Fatalf("--pg-port %d was accepted and would have been narrowed to %d", port, uint16(port))
+			t.Fatalf("--pg-port %d was accepted and would have been narrowed to %d", port, port%65536)
 		}
 	}
 }
@@ -244,4 +245,25 @@ func TestTheSubscriptionIsFoldedBecauseItIsAJoinKey(t *testing.T) {
 	if cfg.vault.SubscriptionID != "a1b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d" {
 		t.Errorf("normalise left the subscription as %q", cfg.vault.SubscriptionID)
 	}
+}
+
+// brokenPipe is a stdout nobody is reading any more.
+type brokenPipe struct{}
+
+func (brokenPipe) Write([]byte) (int, error) { return 0, errors.New("write: broken pipe") }
+
+// The progress log is a courtesy, not a dependency: a line that cannot be written is dropped,
+// and the chain carries on exactly as it would have. This is what say() decides once for every
+// progress line, and the test that keeps a future fmt.Fprintf from deciding otherwise.
+func TestAProgressLineThatCannotBeWrittenIsDropped(t *testing.T) {
+	var lines strings.Builder
+	c := newPGChain(complete(), nil, nil, &lines)
+	c.say("backup: replication slot %q dropped\n", "vp_orders")
+	if got, want := lines.String(), "backup: replication slot \"vp_orders\" dropped\n"; got != want {
+		t.Fatalf("say wrote %q, want %q", got, want)
+	}
+
+	// Nothing to assert but that it returns: say has no error to give back and no panic to raise.
+	broken := newPGChain(complete(), nil, nil, brokenPipe{})
+	broken.say("backup lag: behind=%dB messages=%d collected=%s\n", 0, 0, time.Second)
 }

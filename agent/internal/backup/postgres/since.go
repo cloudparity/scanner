@@ -803,7 +803,7 @@ func (s *Stream) report(got collected, began time.Time) {
 	}
 	lag := Lag{Messages: got.messages, Took: time.Since(began)}
 	if got.serverEnd > got.end {
-		lag.Bytes = int64(got.serverEnd - got.end)
+		lag.Bytes = int64(got.serverEnd - got.end) //gosec:disable G115 -- guarded by the comparison above, and a WAL delta cannot approach 2^63
 	}
 	s.Report(lag)
 }

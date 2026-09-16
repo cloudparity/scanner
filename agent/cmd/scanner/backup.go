@@ -277,7 +277,7 @@ func (c backupConfig) refuse() error {
 	// prevent, arrived at through the flag rather than the environment.
 	if c.port == 0 || c.port > 65535 {
 		return fmt.Errorf("backup: --pg-port is %d, which is not a TCP port; refusing rather than "+
-			"narrowing it to %d and connecting to whatever is listening there", c.port, uint16(c.port))
+			"narrowing it to %d and connecting to whatever is listening there", c.port, c.port%65536)
 	}
 	// Asked here, where refusing is free, rather than at the first cycle: a name outside our
 	// convention creates a slot on the customer's primary that nothing downstream can afterwards
@@ -312,7 +312,7 @@ func backupCommand(args []string) (code int) {
 		return 2
 	}
 	// Narrowed only after refuse() has established it fits.
-	cfg.pg.Port = uint16(cfg.port)
+	cfg.pg.Port = uint16(cfg.port) //gosec:disable G115 -- refuse() above rejected port == 0 || port > 65535
 
 	// CHECKED BEFORE ANYTHING IS OPENED, for the reason destination's own comment gives one command
 	// over: every reason to refuse a url is knowable up front, and finding out after a nine-minute
