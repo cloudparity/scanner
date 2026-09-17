@@ -161,14 +161,30 @@ type armID struct {
 	name         string // original casing: the display value a restore recreates
 	parentID     string // lowercased: it is an id, matched by equality
 
-	// malformed marks an id with an unpaired trailing type segment, or an empty segment.
-	// Flooring the pair count would silently produce a confident wrong type, name and
-	// parent — the "graph that looks right and matches nothing" §2.5 opens by warning
-	// about. An empty segment ("//" inside the id) is the same failure from the other
-	// side: FuzzParseARMID found that "/providers/ns//x" parsed to the type "ns/" with a
-	// parent ending in a slash, keys that no table row and no reference could ever match.
+	// malformed marks an id with an unpaired trailing type segment, an empty segment, or
+	// more segments than maxARMIDSegments. Flooring the pair count would silently produce
+	// a confident wrong type, name and parent — the "graph that looks right and matches
+	// nothing" §2.5 opens by warning about. An empty segment ("//" inside the id) is the
+	// same failure from the other side: FuzzParseARMID found that "/providers/ns//x"
+	// parsed to the type "ns/" with a parent ending in a slash, keys that no table row
+	// and no reference could ever match. An over-long id did not come from ARM at all.
 	malformed bool
 }
+
+// maxARMIDSegments is the most path segments parseARMID will read out of one id.
+//
+// A real ARM id is a short, fixed grammar: /subscriptions/{sub}/resourceGroups/{rg} is
+// four segments, /providers/{namespace} two more, and then one type/name pair per level
+// of nesting. Azure nests proxy resources two or three deep in practice
+// (storageAccounts/sa/blobServices/default/containers/c1), and an extension resource
+// adds a second /providers/{namespace}/{type}/{name} on top of its scope. The longest id
+// this estate has ever met is twelve segments; a policy or role assignment on a deeply
+// nested extension might reach twenty. Sixty-four is several times anything ARM can
+// issue while still being a number, which is the point: the id comes off the wire from
+// the customer's cloud, and without a ceiling its segment count decides how much the
+// parser allocates. Past the ceiling the id is treated like every other id that is not
+// ARM's — malformed, so translate falls back to ARG's own columns and resolve stops.
+const maxARMIDSegments = 64
 
 // parseARMID splits an ARM resourceId, preserving casing; the caller decides what to
 // lowercase.
@@ -195,6 +211,15 @@ func parseARMID(id string) armID {
 	var out armID
 
 	segments := strings.Split(strings.TrimPrefix(strings.TrimRight(id, "/"), "/"), "/")
+
+	// Refuse an id ARM could not have issued before reading anything out of it, so its
+	// segment count never sizes an allocation below. A bound on len(segments) itself is
+	// the check CodeQL's allocation-size-overflow query recognises as a sanitizer; a
+	// bound on some other count of the same thing is not.
+	if len(segments) > maxARMIDSegments {
+		out.malformed = true
+		return out
+	}
 
 	last := -1
 	for i, segment := range segments {
