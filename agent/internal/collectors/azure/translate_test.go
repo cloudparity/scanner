@@ -229,6 +229,22 @@ func TestTranslateParsesIDsPerSpec(t *testing.T) {
 			wantType:    "microsoft.web/sites",
 			wantName:    "web",
 		},
+		{
+			// Nothing ARM issues nests this deep (the longest real shape in this estate
+			// is twelve segments), so an id past maxARMIDSegments did not come from ARM
+			// and its segment count is not something to size allocations by. It is
+			// refused before it is split, so nothing is read out of it at all: ARG's
+			// columns answer for type and name, the account falls back to the scanned
+			// subscription as for any id that names none, and the resource is not
+			// parented.
+			name:        "an id with more segments than ARM can issue is malformed and defers to ARG",
+			id:          "/subscriptions/sub-1/resourceGroups/rg/providers/Microsoft.Web/sites/web" + strings.Repeat("/slots/s", 30),
+			argType:     "Microsoft.Web/sites/slots",
+			argName:     "s",
+			wantAccount: testSubscription,
+			wantType:    "microsoft.web/sites/slots",
+			wantName:    "s",
+		},
 	}
 
 	for _, tc := range tests {
